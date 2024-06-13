@@ -1,0 +1,22 @@
+[package]
+name = "cosmic-settings-subscriptions"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+futures = "0.3.30"
+iced_futures = { git = "https://github.com/pop-os/libcosmic" }
+libpulse-binding = { version = "2.28.1", optional = true }
+log = "0.4.21"
+rustix = { version = "0.38.34", optional = true }
+tokio = { version = "1.38.0", features = ["net", "sync"] }
+# TODO: Branch
+upower_dbus = { git = "https://github.com/pop-os/dbus-settings-bindings", branch = "upower", optional = true }
+zbus = "4.2.2"
+
+[features]
+default = ["airplane_mode", "pulse", "upower"]
+airplane_mode = ["rustix"]
+pulse  = ["libpulse-binding"]
+upower = ["upower_dbus"]
