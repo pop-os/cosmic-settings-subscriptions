@@ -13,13 +13,18 @@ pub fn subscription(connection: zbus::Connection) -> iced_futures::Subscription<
                 Ok(value) => value,
                 Err(_err) => futures::future::pending().await,
             };
-            let disp_stream = settings_daemon
-                .receive_display_brightness_changed()
-                .await
-                .filter_map(
-                    |evt| async move { Some(Event::DisplayBrightness(evt.get().await.ok()?)) },
-                );
-            disp_stream
+            let max_brightness_stream = settings_daemon
+                .receive_max_display_brightness_changed()
+                .await;
+            let brightness_stream = settings_daemon.receive_display_brightness_changed().await;
+            futures::stream_select!(
+                Box::pin(max_brightness_stream.filter_map(|evt| async move {
+                    Some(Event::MaxDisplayBrightness(evt.get().await.ok()?))
+                })),
+                Box::pin(brightness_stream.filter_map(|evt| async move {
+                    Some(Event::DisplayBrightness(evt.get().await.ok()?))
+                }))
+            )
         }
         .flatten_stream(),
     )
@@ -27,6 +32,7 @@ pub fn subscription(connection: zbus::Connection) -> iced_futures::Subscription<
 
 #[derive(Clone, Debug)]
 pub enum Event {
+    MaxDisplayBrightness(i32),
     DisplayBrightness(i32),
 }
 
@@ -38,6 +44,8 @@ pub enum Event {
 trait CosmicSettingsDaemon {
     #[zbus(property)]
     fn display_brightness(&self) -> zbus::Result<i32>;
+    #[zbus(property)]
+    fn max_display_brightness(&self) -> zbus::Result<i32>;
     #[zbus(property)]
     fn keyboard_brightness(&self) -> zbus::Result<i32>;
 }
