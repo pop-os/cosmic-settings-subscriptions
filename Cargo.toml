@@ -16,7 +16,8 @@ upower_dbus = { git = "https://github.com/pop-os/dbus-settings-bindings", option
 zbus = "4.2.2"
 
 [features]
-default = ["airplane_mode", "pulse", "upower"]
+default = ["airplane_mode", "pulse", "upower", "settings_daemon"]
 airplane_mode = ["rustix"]
 pulse  = ["libpulse-binding"]
 upower = ["upower_dbus"]
+settings_daemon = []
