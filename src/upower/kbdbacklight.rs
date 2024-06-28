@@ -1,32 +1,28 @@
 // Copyright 2024 System76 <info@system76.com>
 // SPDX-License-Identifier: MPL-2.0
 
-use futures::{SinkExt, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use std::{fmt::Debug, hash::Hash};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use upower_dbus::{BrightnessChanged, KbdBacklightProxy};
 
 pub fn kbd_backlight_subscription<I: 'static + Hash + Copy + Send + Sync + Debug>(
     id: I,
 ) -> iced_futures::Subscription<KeyboardBacklightUpdate> {
-    iced_futures::subscription::channel(id, 50, move |mut output| async move {
-        if let Err(err) = listen(&mut output).await {
-            log::error!("Error listening to KbdBacklight: {}", err);
+    iced_futures::subscription::run_with_id(
+        id,
+        async move {
+            match events().await {
+                Ok(stream) => stream,
+                Err(err) => {
+                    log::error!("Error listening to KbdBacklight: {}", err);
+                    futures::future::pending().await
+                }
+            }
         }
-
-        futures::future::pending().await
-    })
-}
-
-#[derive(Debug)]
-pub enum State {
-    Ready,
-    Waiting(
-        KbdBacklightProxy<'static>,
-        UnboundedReceiver<KeyboardBacklightRequest>,
-    ),
-    Finished,
+        .flatten_stream(),
+    )
 }
 
 enum Event {
@@ -38,46 +34,48 @@ async fn get_brightness(kbd_proxy: &KbdBacklightProxy<'_>) -> zbus::Result<f64> 
     Ok(kbd_proxy.get_brightness().await? as f64 / kbd_proxy.get_max_brightness().await? as f64)
 }
 
-async fn listen(
-    output: &mut futures::channel::mpsc::Sender<KeyboardBacklightUpdate>,
-) -> zbus::Result<()> {
+async fn events() -> zbus::Result<impl Stream<Item = KeyboardBacklightUpdate>> {
     let conn = zbus::Connection::system().await?;
     let kbd_proxy = KbdBacklightProxy::builder(&conn).build().await?;
     let (tx, rx) = unbounded_channel();
 
     let b = get_brightness(&kbd_proxy).await.ok();
-    _ = output.send(KeyboardBacklightUpdate::Sender(tx)).await;
-    _ = output.send(KeyboardBacklightUpdate::Brightness(b)).await;
 
     let brightness_changed_stream = kbd_proxy.receive_brightness_changed().await?;
 
-    let mut stream = futures::stream::select(
+    let initial = futures::stream::iter([
+        KeyboardBacklightUpdate::Sender(tx),
+        KeyboardBacklightUpdate::Brightness(b),
+    ]);
+    let stream = futures::stream::select(
         UnboundedReceiverStream::new(rx).map(Event::Request),
         brightness_changed_stream.map(Event::BrightnessChanged),
     );
-    while let Some(event) = stream.next().await {
-        match event {
-            Event::BrightnessChanged(_changed) => {
-                let b = get_brightness(&kbd_proxy).await.ok();
-                _ = output.send(KeyboardBacklightUpdate::Brightness(b)).await;
-            }
-            Event::Request(req) => match req {
-                KeyboardBacklightRequest::Get => {
+    Ok(initial.chain(stream.filter_map(move |event| {
+        let kbd_proxy = kbd_proxy.clone();
+        async move {
+            match event {
+                Event::BrightnessChanged(_changed) => {
                     let b = get_brightness(&kbd_proxy).await.ok();
-                    _ = output.send(KeyboardBacklightUpdate::Brightness(b)).await;
+                    Some(KeyboardBacklightUpdate::Brightness(b))
                 }
-                KeyboardBacklightRequest::Set(value) => {
-                    if let Ok(max_brightness) = kbd_proxy.get_max_brightness().await {
-                        let value = value.clamp(0., 1.) * (max_brightness as f64);
-                        let value = value.round() as i32;
-                        let _ = kbd_proxy.set_brightness(value).await;
+                Event::Request(req) => match req {
+                    KeyboardBacklightRequest::Get => {
+                        let b = get_brightness(&kbd_proxy).await.ok();
+                        Some(KeyboardBacklightUpdate::Brightness(b))
                     }
-                }
-            },
+                    KeyboardBacklightRequest::Set(value) => {
+                        if let Ok(max_brightness) = kbd_proxy.get_max_brightness().await {
+                            let value = value.clamp(0., 1.) * (max_brightness as f64);
+                            let value = value.round() as i32;
+                            let _ = kbd_proxy.set_brightness(value).await;
+                        }
+                        None
+                    }
+                },
+            }
         }
-    }
-
-    Ok(())
+    })))
 }
 
 #[derive(Debug, Clone)]
