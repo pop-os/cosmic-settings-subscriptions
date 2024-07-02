@@ -47,9 +47,12 @@ async fn events() -> zbus::Result<impl Stream<Item = DeviceDbusEvent>> {
             break;
         }
     }
-    if !has_battery {
-        std::process::exit(0);
-    }
+
+    let initial = futures::stream::iter(if has_battery {
+        None
+    } else {
+        Some(DeviceDbusEvent::NoBattery)
+    });
 
     let stream = futures::stream_select!(
         upower.receive_on_battery_changed().await.map(|_| ()),
@@ -57,24 +60,27 @@ async fn events() -> zbus::Result<impl Stream<Item = DeviceDbusEvent>> {
         device.receive_time_to_empty_changed().await.map(|_| ()),
     );
 
-    Ok(stream.map(move |_| DeviceDbusEvent::Update {
-        on_battery: upower
-            .cached_on_battery()
-            .unwrap_or_default()
-            .unwrap_or_default(),
-        percent: device
-            .cached_percentage()
-            .unwrap_or_default()
-            .unwrap_or_default(),
-        time_to_empty: device
-            .cached_time_to_empty()
-            .unwrap_or_default()
-            .unwrap_or_default(),
-    }))
+    Ok(initial.chain(stream.map(move |_| {
+        DeviceDbusEvent::Update {
+            on_battery: upower
+                .cached_on_battery()
+                .unwrap_or_default()
+                .unwrap_or_default(),
+            percent: device
+                .cached_percentage()
+                .unwrap_or_default()
+                .unwrap_or_default(),
+            time_to_empty: device
+                .cached_time_to_empty()
+                .unwrap_or_default()
+                .unwrap_or_default(),
+        }
+    })))
 }
 
 #[derive(Debug, Clone)]
 pub enum DeviceDbusEvent {
+    NoBattery,
     Update {
         on_battery: bool,
         percent: f64,
