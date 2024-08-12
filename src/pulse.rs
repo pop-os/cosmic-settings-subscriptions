@@ -12,6 +12,7 @@ use libpulse_binding::{
         subscribe::{Facility, InterestMaskSet, Operation},
         Context, FlagSet, State,
     },
+    def::Retval,
     mainloop::standard::{IterateResult, Mainloop},
     volume::Volume,
 };
@@ -22,6 +23,8 @@ use std::{
 
 #[derive(Clone, Debug)]
 pub enum Event {
+    DefaultSink(String),
+    DefaultSource(String),
     SinkVolume(u32),
     SinkMute(bool),
     SourceVolume(u32),
@@ -36,6 +39,7 @@ pub fn subscription() -> iced_futures::Subscription<Event> {
 }
 
 struct Data {
+    main_loop: RefCell<Mainloop>,
     default_sink_name: RefCell<Option<String>>,
     default_source_name: RefCell<Option<String>>,
     sink_volume: Cell<Option<u32>>,
@@ -55,6 +59,11 @@ impl Data {
         let mut default_sink_name = self.default_sink_name.borrow_mut();
         if new_default_sink_name != *default_sink_name {
             if let Some(name) = &new_default_sink_name {
+                _ = block_on(
+                    self.sender
+                        .borrow_mut()
+                        .send(Event::DefaultSink(name.clone())),
+                );
                 self.get_sink_info_by_name(name);
             }
             *default_sink_name = new_default_sink_name;
@@ -67,6 +76,11 @@ impl Data {
         let mut default_source_name = self.default_source_name.borrow_mut();
         if new_default_source_name != *default_source_name {
             if let Some(name) = &new_default_source_name {
+                _ = block_on(
+                    self.sender
+                        .borrow_mut()
+                        .send(Event::DefaultSource(name.clone())),
+                );
                 self.get_source_info_by_name(name);
             }
             *default_source_name = new_default_source_name;
@@ -87,15 +101,21 @@ impl Data {
             let volume = sink_info.volume.avg().0 / (Volume::NORMAL.0 / 100);
             if self.sink_mute.get() != Some(sink_info.mute) {
                 self.sink_mute.set(Some(sink_info.mute));
-                let _ = block_on(
+                if block_on(
                     self.sender
                         .borrow_mut()
                         .send(Event::SinkMute(sink_info.mute)),
-                );
+                )
+                .is_err()
+                {
+                    self.main_loop.borrow_mut().quit(Retval(0));
+                }
             }
             if self.sink_volume.get() != Some(volume) {
                 self.sink_volume.set(Some(volume));
-                let _ = block_on(self.sender.borrow_mut().send(Event::SinkVolume(volume)));
+                if block_on(self.sender.borrow_mut().send(Event::SinkVolume(volume))).is_err() {
+                    self.main_loop.borrow_mut().quit(Retval(0));
+                }
             }
         }
     }
@@ -108,15 +128,21 @@ impl Data {
             let volume = source_info.volume.avg().0 / (Volume::NORMAL.0 / 100);
             if self.source_mute.get() != Some(source_info.mute) {
                 self.source_mute.set(Some(source_info.mute));
-                let _ = block_on(
+                if block_on(
                     self.sender
                         .borrow_mut()
                         .send(Event::SourceMute(source_info.mute)),
-                );
+                )
+                .is_err()
+                {
+                    self.main_loop.borrow_mut().quit(Retval(0));
+                }
             }
             if self.source_volume.get() != Some(volume) {
                 self.source_volume.set(Some(volume));
-                let _ = block_on(self.sender.borrow_mut().send(Event::SourceVolume(volume)));
+                if block_on(self.sender.borrow_mut().send(Event::SourceVolume(volume))).is_err() {
+                    self.main_loop.borrow_mut().quit(Retval(0));
+                }
             }
         }
     }
@@ -180,12 +206,16 @@ fn thread(sender: futures::channel::mpsc::Sender<Event>) {
             log::error!("Failed to create PA main loop");
             return;
         };
+
         let Some(mut context) = Context::new(&main_loop, "cosmic-osd") else {
             log::error!("Failed to create PA context");
             return;
         };
 
         let data = Rc::new(Data {
+            main_loop: RefCell::new(Mainloop {
+                _inner: Rc::clone(&main_loop._inner),
+            }),
             introspector: context.introspect(),
             sink_volume: Cell::new(None),
             sink_mute: Cell::new(None),
