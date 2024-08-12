@@ -200,7 +200,7 @@ impl Data {
     }
 }
 
-fn thread(sender: futures::channel::mpsc::Sender<Event>) {
+pub fn thread(sender: futures::channel::mpsc::Sender<Event>) {
     loop {
         let Some(mut main_loop) = Mainloop::new() else {
             log::error!("Failed to create PA main loop");
