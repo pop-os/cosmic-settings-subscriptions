@@ -63,14 +63,26 @@ pub enum DeviceEvent {
 #[derive(Clone, Debug)]
 pub struct Device {
     pub object_id: u32,
-    pub alsa_card: u32,
-    pub card_profile_device: u32,
+    pub variant: DeviceVariant,
     pub media_class: MediaClass,
-    pub alsa_card_name: String,
-    pub device_profile_description: String,
     pub node_description: String,
     pub node_name: String,
     pub state: DeviceState,
+}
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+pub enum DeviceVariant {
+    Alsa {
+        alsa_card: u32,
+        alsa_card_name: String,
+        card_profile_device: u32,
+        device_profile_description: String,
+    },
+    Bluez5 {
+        address: String,
+        codec: String,
+        profile: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,17 +106,30 @@ impl Device {
     pub fn from_node(info: &NodeInfoRef) -> Option<Self> {
         let props = info.props()?;
 
+        let variant =
+            if let Some(alsa_card) = props.get("alsa.card").and_then(|v| v.parse::<u32>().ok()) {
+                DeviceVariant::Alsa {
+                    alsa_card,
+                    alsa_card_name: props.get("alsa.card_name")?.to_owned(),
+                    card_profile_device: props.get("card.profile.device")?.parse::<u32>().ok()?,
+                    device_profile_description: props.get("device.profile.description")?.to_owned(),
+                }
+            } else {
+                DeviceVariant::Bluez5 {
+                    address: props.get("api.bluez5.address")?.to_owned(),
+                    codec: props.get("api.bluez5.codec")?.to_owned(),
+                    profile: props.get("api.bluez5.profile")?.to_owned(),
+                }
+            };
+
         Some(Device {
             object_id: props.get("object.id")?.parse::<u32>().ok()?,
-            alsa_card: props.get("alsa.card")?.parse::<u32>().ok()?,
-            card_profile_device: props.get("card.profile.device")?.parse::<u32>().ok()?,
+            variant,
             media_class: match props.get("media.class")? {
                 "Audio/Sink" => MediaClass::Sink,
                 "Audio/Source" => MediaClass::Source,
                 _ => return None,
             },
-            alsa_card_name: props.get("alsa.card_name")?.to_owned(),
-            device_profile_description: props.get("device.profile.description")?.to_owned(),
             node_description: props
                 .get("node.description")?
                 .replace("High Definition Audio", "HD Audio"),
