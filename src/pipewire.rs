@@ -44,7 +44,7 @@ pub fn thread(
 #[derive(Debug)]
 pub enum NodeEvent<'a> {
     /// Node info
-    NodeInfo(&'a NodeInfoRef),
+    NodeInfo(u32, &'a NodeInfoRef),
     /// Node removal
     Remove(u32),
 }
@@ -155,11 +155,9 @@ pub fn devices_from_socket(
     let mut managed = BTreeMap::new();
 
     let _res = nodes_from_socket(pw_cancel, move |main_loop, event| match event {
-        NodeEvent::NodeInfo(info) => {
-            let id = info.id();
-
+        NodeEvent::NodeInfo(pw_id, info) => {
             if let Some(device) = Device::from_node(info) {
-                if managed.insert(id, device.object_id).is_none() {
+                if managed.insert(pw_id, device.object_id).is_none() {
                     if block_on(on_event.send(DeviceEvent::Add(device))).is_err() {
                         main_loop.quit();
                     }
@@ -212,19 +210,20 @@ pub fn nodes_from_socket(
             };
 
             let attached_proxy: Option<(Box<dyn ProxyT>, Box<dyn Listener>)> = match obj.type_ {
-                pipewire::types::ObjectType::Node => {
+                ObjectType::Node => {
                     let Ok(node): Result<Node, _> = registry.bind(obj) else {
                         return;
                     };
 
                     let on_event_weak = Rc::downgrade(&on_event);
                     let main_loop = main_loop_clone.clone();
+                    let id = node.upcast_ref().id();
 
                     let listener = node
                         .add_listener_local()
                         .info(move |info| {
                             if let Some(on_event) = on_event_weak.upgrade() {
-                                on_event.borrow_mut()(&main_loop, NodeEvent::NodeInfo(info));
+                                on_event.borrow_mut()(&main_loop, NodeEvent::NodeInfo(id, info));
                             }
                         })
                         .register();
@@ -247,14 +246,14 @@ pub fn nodes_from_socket(
                 let remove_listener = proxy
                     .add_listener_local()
                     .removed(move || {
-                        if let Some(proxies) = proxies_weak.upgrade() {
-                            proxies.borrow_mut().remove(&id);
-                        }
-
-                        if object_type == ObjectType::Device {
+                        if object_type == ObjectType::Node {
                             if let Some(on_event) = on_event_weak.upgrade() {
                                 on_event.borrow_mut()(&main_loop, NodeEvent::Remove(id));
                             }
+                        }
+
+                        if let Some(proxies) = proxies_weak.upgrade() {
+                            proxies.borrow_mut().remove(&id);
                         }
                     })
                     .register();
