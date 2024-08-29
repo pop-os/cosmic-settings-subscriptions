@@ -9,7 +9,7 @@ use futures::{executor::block_on, SinkExt};
 use pipewire::{
     context::Context as PwContext,
     main_loop::MainLoop as PwMainLoop,
-    node::{Node, NodeChangeMask, NodeInfoRef, NodeState},
+    node::{Node, NodeInfoRef, NodeState},
     proxy::{Listener, ProxyT},
     types::ObjectType,
 };

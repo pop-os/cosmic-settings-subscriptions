@@ -5,21 +5,37 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+cosmic-dbus-networkmanager = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
 futures = "0.3.30"
 iced_futures = { git = "https://github.com/pop-os/libcosmic" }
+itertools = "0.13.0"
 libpulse-binding = { version = "2.28.1", optional = true }
-log = "0.4.21"
+log = "0.4.22"
 pipewire = { version = "0.8.0", optional = true }
-rustix = { version = "0.38.34", optional = true }
-tokio = { version = "1.38.0", features = ["net", "sync"] }
+rustix = { version = "0.38.35", optional = true }
+secure-string = { version = "0.3.0", optional = true }
+thiserror = "1.0.63"
+tokio = { version = "1.39.3", features = ["net", "process", "sync"] }
 tokio-stream = "0.1.15"
+tracing = "0.1.40"
 upower_dbus = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
-zbus = "4.2.2"
+zbus = "4.4.0"
 
 [features]
-default = ["airplane_mode", "pulse", "upower", "settings_daemon"]
+default = [
+    "airplane_mode",
+    "network_manager",
+    "pulse",
+    "upower",
+    "settings_daemon",
+]
 airplane_mode = ["rustix"]
+network_manager = ["dep:cosmic-dbus-networkmanager", "dep:secure-string"]
 pipewire = ["dep:pipewire"]
 pulse = ["libpulse-binding"]
 upower = ["upower_dbus"]
 settings_daemon = []
+
+# [patch.'https://github.com/pop-os/dbus-settings-bindings']
+# cosmic-dbus-networkmanager = { path = "../dbus-settings-bindings/networkmanager" }
+# upower_dbus = { path = "../dbus-settings-bindings/upower" }
