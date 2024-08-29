@@ -4,6 +4,9 @@
 #[cfg(feature = "airplane_mode")]
 pub mod airplane_mode;
 
+#[cfg(feature = "network_manager")]
+pub mod network_manager;
+
 #[cfg(feature = "pipewire")]
 pub mod pipewire;
 
