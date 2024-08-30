@@ -7,7 +7,7 @@ pub mod current_networks;
 pub mod devices;
 pub mod wireless_enabled;
 
-use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt::Debug, future::Future, sync::Arc, time::Duration};
 
 pub use cosmic_dbus_networkmanager as dbus;
 pub use dbus::settings::connection::Settings;
@@ -450,27 +450,6 @@ async fn request_response(conn: &zbus::Connection, req: Request, success: bool) 
         success,
         state: NetworkManagerState::new(conn).await.unwrap_or_default(),
     }
-}
-
-pub async fn settings<'a>(
-    conn: &'a zbus::Connection,
-) -> zbus::Result<Vec<crate::network_manager::Settings>> {
-    let settings = NetworkManagerSettings::new(conn).await?;
-    let connections = settings.list_connections().await?;
-
-    let settings = futures::stream::FuturesOrdered::from_iter(connections.into_iter().map(
-        |conn| async move {
-            conn.get_settings()
-                .await
-                .ok()
-                .map(crate::network_manager::Settings::new)
-        },
-    ))
-    .filter_map(|res| async move { res })
-    .collect()
-    .await;
-
-    Ok(settings)
 }
 
 #[derive(Debug, Clone)]
