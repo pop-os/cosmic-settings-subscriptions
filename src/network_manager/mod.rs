@@ -20,7 +20,7 @@ use cosmic_dbus_networkmanager::{
         enums::{self, ActiveConnectionState, DeviceType, NmConnectivityState},
     },
     nm::NetworkManager,
-    settings::NetworkManagerSettings,
+    settings::{connection::ConnectionSettings, NetworkManagerSettings},
 };
 use futures::{
     channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
@@ -193,14 +193,12 @@ async fn start_listening(
                             break;
                         }
                     }
-                    _ = output
-                        .send(Event::RequestResponse {
-                            req: Request::Deactivate(uuid.clone()),
-                            success,
-                            state: NetworkManagerState::new(&conn).await.unwrap_or_default(),
-                        })
+
+                    _ = request_response(&conn, Request::Deactivate(uuid.clone()), success)
+                        .then(|event| output.send(event))
                         .await;
                 }
+
                 Some(Request::Disconnect(ssid)) => {
                     let mut success = false;
                     for c in network_manager
@@ -232,14 +230,12 @@ async fn start_listening(
                             break;
                         }
                     }
-                    _ = output
-                        .send(Event::RequestResponse {
-                            req: Request::Disconnect(ssid.clone()),
-                            success,
-                            state: NetworkManagerState::new(&conn).await.unwrap_or_default(),
-                        })
+
+                    _ = request_response(&conn, Request::Disconnect(ssid.clone()), success)
+                        .then(|event| output.send(event))
                         .await;
                 }
+
                 Some(Request::SetAirplaneMode(airplane_mode)) => {
                     // wifi
                     let mut success = network_manager
@@ -254,6 +250,7 @@ async fn start_listening(
                             .output()
                             .await
                             .is_ok();
+
                     let mut state = NetworkManagerState::new(&conn).await.unwrap_or_default();
                     state.airplane_mode = if success {
                         airplane_mode
@@ -263,6 +260,7 @@ async fn start_listening(
                     if state.airplane_mode {
                         state.wifi_enabled = false;
                     }
+
                     _ = output
                         .send(Event::RequestResponse {
                             req: Request::SetAirplaneMode(airplane_mode),
@@ -271,6 +269,7 @@ async fn start_listening(
                         })
                         .await;
                 }
+
                 Some(Request::SetWiFi(enabled)) => {
                     let success = network_manager.set_wireless_enabled(enabled).await.is_ok();
 
@@ -280,17 +279,13 @@ async fn start_listening(
 
                     if state.wifi_enabled {
                         tokio::time::sleep(Duration::from_secs(3)).await;
-                        state = NetworkManagerState::new(&conn).await.unwrap_or_default();
                     }
 
-                    _ = output
-                        .send(Event::RequestResponse {
-                            req: Request::SetWiFi(enabled),
-                            success,
-                            state,
-                        })
+                    _ = request_response(&conn, Request::SetWiFi(enabled), success)
+                        .then(|event| output.send(event))
                         .await;
                 }
+
                 Some(Request::Password(ssid, password)) => {
                     let nm_state = NetworkManagerState::new(&conn).await.unwrap_or_default();
                     let success = nm_state
@@ -307,15 +302,12 @@ async fn start_listening(
                     if let Some(e) = status {
                         _ = output.send(e).await;
                     } else {
-                        _ = output
-                            .send(Event::RequestResponse {
-                                req: Request::Password(ssid, password),
-                                success: false,
-                                state: NetworkManagerState::new(&conn).await.unwrap_or_default(),
-                            })
+                        _ = request_response(&conn, Request::Password(ssid, password), success)
+                            .then(|event| output.send(event))
                             .await;
                     }
                 }
+
                 Some(Request::SelectAccessPoint(ssid)) => {
                     let state = NetworkManagerState::new(&conn).await.unwrap_or_default();
                     let success = if let Err(err) = state.connect_wifi(&conn, &ssid, None).await {
@@ -325,14 +317,11 @@ async fn start_listening(
                         true
                     };
 
-                    _ = output
-                        .send(Event::RequestResponse {
-                            req: Request::SelectAccessPoint(ssid.clone()),
-                            success,
-                            state: NetworkManagerState::new(&conn).await.unwrap_or_default(),
-                        })
+                    _ = request_response(&conn, Request::SelectAccessPoint(ssid.clone()), success)
+                        .then(|event| output.send(event))
                         .await;
                 }
+
                 Some(Request::Activate(device_path, connection_path)) => {
                     let mut success = true;
 
@@ -347,24 +336,62 @@ async fn start_listening(
                         success = false;
                     };
 
-                    _ = output
-                        .send(Event::RequestResponse {
-                            req: Request::Activate(device_path, connection_path),
-                            success,
-                            state: NetworkManagerState::new(&conn).await.unwrap_or_default(),
-                        })
-                        .await;
+                    _ = request_response(
+                        &conn,
+                        Request::Activate(device_path, connection_path),
+                        success,
+                    )
+                    .then(|event| output.send(event))
+                    .await;
                 }
+
                 Some(Request::Reload) => {
-                    let state = NetworkManagerState::new(&conn).await.unwrap_or_default();
                     _ = output
-                        .send(Event::RequestResponse {
-                            req: Request::Reload,
-                            success: true,
-                            state,
-                        })
+                        .send(request_response(&conn, Request::Reload, true).await)
                         .await;
                 }
+
+                Some(Request::Remove(uuid)) => {
+                    let s = match NetworkManagerSettings::new(&conn).await {
+                        Ok(s) => s,
+                        Err(why) => {
+                            tracing::error!(?why, "error getting network manager settings");
+                            _ = output
+                                .send(Event::RequestResponse {
+                                    req: Request::Forget(uuid.clone()),
+                                    success: false,
+                                    state: NetworkManagerState::new(&conn)
+                                        .await
+                                        .unwrap_or_default(),
+                                })
+                                .await;
+
+                            return State::Waiting(conn, rx);
+                        }
+                    };
+
+                    let known_conns = s.list_connections().await.unwrap_or_default();
+                    let mut success = false;
+                    for c in known_conns {
+                        let settings = c.get_settings().await.ok().unwrap_or_default();
+
+                        let c_uuid = settings
+                            .get("connection")
+                            .and_then(|conn| conn.get("uuid"))
+                            .and_then(|uuid| uuid.downcast_ref::<String>().ok())
+                            .unwrap_or_default();
+
+                        if uuid.as_ref() == c_uuid.as_str() {
+                            _ = c.delete().await;
+                            success = true;
+                        }
+                    }
+
+                    _ = request_response(&conn, Request::Remove(uuid.clone()), success)
+                        .then(|event| output.send(event))
+                        .await;
+                }
+
                 Some(Request::Forget(ssid)) => {
                     let s = match NetworkManagerSettings::new(&conn).await {
                         Ok(s) => s,
@@ -400,16 +427,13 @@ async fn start_listening(
                             break;
                         }
                     }
-                    let state = NetworkManagerState::new(&conn).await.unwrap_or_default();
-                    _ = output
-                        .send(Event::RequestResponse {
-                            req: Request::Forget(ssid.clone()),
-                            success,
-                            state,
-                        })
+
+                    _ = request_response(&conn, Request::Forget(ssid.clone()), success)
+                        .then(|event| output.send(event))
                         .await;
                 }
-                _ => {
+
+                None => {
                     return State::Finished;
                 }
             };
@@ -417,6 +441,14 @@ async fn start_listening(
             State::Waiting(conn, rx)
         }
         State::Finished => futures::future::pending().await,
+    }
+}
+
+async fn request_response(conn: &zbus::Connection, req: Request, success: bool) -> Event {
+    Event::RequestResponse {
+        req,
+        success,
+        state: NetworkManagerState::new(conn).await.unwrap_or_default(),
     }
 }
 
@@ -455,6 +487,8 @@ pub enum Request {
     Password(SSID, SecureString),
     /// Signal to reload the service.
     Reload,
+    /// Remove a connection profile.
+    Remove(UUID),
     /// Connect to a known access point.
     SelectAccessPoint(SSID),
     /// Toggle airplaine mode.
