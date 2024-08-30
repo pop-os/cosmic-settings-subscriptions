@@ -62,8 +62,7 @@ pub async fn list<'a>(
                         .get("connection")?
                         .get("id")?
                         .downcast_ref::<String>()
-                        .ok()?
-                        .to_owned();
+                        .ok()?;
 
                     let uuid = settings["connection"]
                         .get("uuid")?
