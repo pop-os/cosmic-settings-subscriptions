@@ -7,7 +7,7 @@ pub mod current_networks;
 pub mod devices;
 pub mod wireless_enabled;
 
-use std::{collections::HashMap, fmt::Debug, future::Future, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 
 pub use cosmic_dbus_networkmanager as dbus;
 pub use dbus::settings::connection::Settings;
@@ -20,7 +20,7 @@ use cosmic_dbus_networkmanager::{
         enums::{self, ActiveConnectionState, DeviceType, NmConnectivityState},
     },
     nm::NetworkManager,
-    settings::{connection::ConnectionSettings, NetworkManagerSettings},
+    settings::NetworkManagerSettings,
 };
 use futures::{
     channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
