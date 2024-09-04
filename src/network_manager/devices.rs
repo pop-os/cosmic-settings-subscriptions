@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use super::Event;
-pub use cosmic_dbus_networkmanager::interface::enums::DeviceType;
+pub use cosmic_dbus_networkmanager::interface::enums::{
+    ActiveConnectionState, DeviceState, DeviceType,
+};
+
 use cosmic_dbus_networkmanager::nm::NetworkManager;
 use futures::{SinkExt, StreamExt};
 use iced_futures::{self, subscription};
@@ -14,6 +17,8 @@ pub struct DeviceInfo {
     pub path: ObjectPath<'static>,
     pub device_type: DeviceType,
     pub interface: String,
+    pub state: DeviceState,
+    pub active_connection: Option<(DeviceConnection, ActiveConnectionState)>,
     pub available_connections: Vec<DeviceConnection>,
 }
 
@@ -32,13 +37,15 @@ pub async fn list<'a>(
     let devices = nm.devices().await?;
 
     let device_iter = devices.into_iter().map(|device| async move {
-        let (interface, hw_address, device_type, active_connections) = futures::try_join!(
-            device.interface(),
-            device.hw_address(),
-            device.device_type(),
-            device.available_connections()
-        )
-        .ok()?;
+        let (interface, hw_address, device_type, state, available_connections) =
+            futures::try_join!(
+                device.interface(),
+                device.hw_address(),
+                device.device_type(),
+                device.state(),
+                device.available_connections()
+            )
+            .ok()?;
 
         if !device_type_filter(device_type) {
             return None;
@@ -48,12 +55,24 @@ pub async fn list<'a>(
             return None;
         }
 
-        Some(DeviceInfo {
-            path: device.inner().path().to_owned(),
-            device_type,
-            interface,
-            available_connections: futures::stream::FuturesOrdered::from_iter(
-                active_connections.into_iter().map(|conn| async move {
+        let (active_connection, available_connections) = futures::join!(
+            async {
+                let connection = device.active_connection().await?;
+
+                let (id, uuid, state) =
+                    futures::try_join!(connection.id(), connection.uuid(), connection.state())?;
+
+                Ok::<_, zbus::Error>((
+                    DeviceConnection {
+                        id,
+                        uuid: Arc::from(uuid),
+                        path: connection.inner().path().to_owned(),
+                    },
+                    state,
+                ))
+            },
+            futures::stream::FuturesOrdered::from_iter(available_connections.into_iter().map(
+                |conn| async move {
                     let path = conn.inner().path().to_owned();
 
                     let settings = conn.get_settings().await.ok()?;
@@ -74,11 +93,19 @@ pub async fn list<'a>(
                         uuid: Arc::from(uuid),
                         path,
                     })
-                }),
-            )
+                }
+            ),)
             .filter_map(|res| async move { res })
-            .collect()
-            .await,
+            .collect::<Vec<_>>()
+        );
+
+        Some(DeviceInfo {
+            path: device.inner().path().to_owned(),
+            device_type,
+            interface,
+            state,
+            active_connection: active_connection.ok(),
+            available_connections,
         })
     });
 
