@@ -20,11 +20,18 @@ pub struct DeviceInfo {
     pub state: DeviceState,
     pub active_connection: Option<(DeviceConnection, ActiveConnectionState)>,
     pub available_connections: Vec<DeviceConnection>,
+    pub known_connections: Vec<KnownDeviceConnection>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DeviceConnection {
     pub path: ObjectPath<'static>,
+    pub id: String,
+    pub uuid: Arc<str>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct KnownDeviceConnection {
     pub id: String,
     pub uuid: Arc<str>,
 }
@@ -35,6 +42,19 @@ pub async fn list<'a>(
 ) -> zbus::Result<Vec<DeviceInfo>> {
     let nm = NetworkManager::new(conn).await?;
     let devices = nm.devices().await?;
+
+    let (devices, nm_settings) = futures::try_join!(nm.devices(), nm.settings())?;
+
+    let connection_settings: &Vec<_> = &futures::stream::FuturesOrdered::from_iter(
+        nm_settings
+            .list_connections()
+            .await?
+            .into_iter()
+            .map(|connection| async move { connection.get_settings().await }),
+    )
+    .filter_map(|res| async move { res.ok() })
+    .collect()
+    .await;
 
     let device_iter = devices.into_iter().map(|device| async move {
         let (interface, hw_address, device_type, state, available_connections) =
@@ -99,12 +119,37 @@ pub async fn list<'a>(
             .collect::<Vec<_>>()
         );
 
+        let known_connections = connection_settings
+            .iter()
+            .flat_map(|conn_settings| {
+                let connection = conn_settings.get("connection")?;
+
+                let interface_name = connection
+                    .get("interface-name")?
+                    .downcast_ref::<String>()
+                    .ok()?;
+
+                if interface_name != interface {
+                    return None;
+                }
+
+                let id = connection.get("id")?.downcast_ref::<String>().ok()?;
+                let uuid = connection.get("uuid")?.downcast_ref::<String>().ok()?;
+
+                Some(KnownDeviceConnection {
+                    uuid: Arc::from(uuid),
+                    id,
+                })
+            })
+            .collect();
+
         Some(DeviceInfo {
             path: device.inner().path().to_owned(),
             device_type,
             interface,
             state,
             active_connection: active_connection.ok(),
+            known_connections,
             available_connections,
         })
     });
