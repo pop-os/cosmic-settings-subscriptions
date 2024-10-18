@@ -8,7 +8,7 @@ pub use cosmic_dbus_networkmanager::interface::enums::{
 
 use cosmic_dbus_networkmanager::nm::NetworkManager;
 use futures::{SinkExt, StreamExt};
-use iced_futures::{self, subscription};
+use iced_futures::{self, stream, Subscription};
 use std::{fmt::Debug, hash::Hash, sync::Arc};
 use zbus::{zvariant::ObjectPath, Connection};
 
@@ -167,10 +167,13 @@ pub fn subscription<I: 'static + Hash + Copy + Send + Sync + Debug>(
     has_popup: bool,
     conn: Connection,
 ) -> iced_futures::Subscription<Event> {
-    subscription::channel((id, has_popup), 50, move |output| async move {
-        watch(conn, has_popup, output).await;
-        futures::future::pending().await
-    })
+    Subscription::run_with_id(
+        (id, has_popup),
+        stream::channel(50, move |output| async move {
+            watch(conn, has_popup, output).await;
+            futures::future::pending().await
+        }),
+    )
 }
 
 pub async fn watch(

@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use futures::{FutureExt, Stream, StreamExt};
+use iced_futures::Subscription;
 use std::{fmt::Debug, hash::Hash};
 use upower_dbus::{BatteryType, DeviceProxy, UPowerProxy};
 
 pub fn device_subscription<I: 'static + Hash + Copy + Send + Sync + Debug>(
     id: I,
 ) -> iced_futures::Subscription<DeviceDbusEvent> {
-    iced_futures::subscription::run_with_id(
+    Subscription::run_with_id(
         id,
         async move {
             match events().await {

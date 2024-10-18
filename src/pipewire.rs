@@ -6,6 +6,7 @@
 pub use pipewire::channel::Sender;
 
 use futures::{executor::block_on, SinkExt};
+use iced_futures::{stream, Subscription};
 use pipewire::{
     context::Context as PwContext,
     main_loop::MainLoop as PwMainLoop,
@@ -21,11 +22,14 @@ use std::{
 };
 
 pub fn subscription() -> iced_futures::Subscription<DeviceEvent> {
-    iced_futures::subscription::channel("pipewire", 20, |sender| async {
-        _ = thread(sender);
+    Subscription::run_with_id(
+        "pipewire",
+        stream::channel(20, |sender| async {
+            _ = thread(sender);
 
-        futures::future::pending().await
-    })
+            futures::future::pending().await
+        }),
+    )
 }
 
 pub fn thread(
