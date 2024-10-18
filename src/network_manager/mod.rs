@@ -26,7 +26,7 @@ use futures::{
     channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
     FutureExt, SinkExt, StreamExt,
 };
-use iced_futures::subscription;
+use iced_futures::{stream, Subscription};
 use secure_string::SecureString;
 use tokio::process::Command;
 use zbus::zvariant::{self, ObjectPath, Value};
@@ -119,10 +119,13 @@ pub fn subscription<I: Copy + Debug + std::hash::Hash + 'static>(
     id: I,
     conn: zbus::Connection,
 ) -> iced_futures::Subscription<Event> {
-    subscription::channel(id, 50, |output| async move {
-        watch(conn, output).await;
-        futures::future::pending().await
-    })
+    Subscription::run_with_id(
+        id,
+        stream::channel(50, |output| async move {
+            watch(conn, output).await;
+            futures::future::pending().await
+        }),
+    )
 }
 
 pub async fn watch(conn: zbus::Connection, mut output: futures::channel::mpsc::Sender<Event>) {

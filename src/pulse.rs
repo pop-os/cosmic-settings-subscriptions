@@ -5,6 +5,7 @@
 // change to device shouldn't send osd?
 
 use futures::{executor::block_on, SinkExt};
+use iced_futures::{stream, Subscription};
 use libpulse_binding::{
     callbacks::ListResult,
     context::{
@@ -23,10 +24,13 @@ use std::{
 };
 
 pub fn subscription() -> iced_futures::Subscription<Event> {
-    iced_futures::subscription::channel("pulse", 20, |sender| async {
-        std::thread::spawn(move || thread(sender));
-        futures::future::pending().await
-    })
+    Subscription::run_with_id(
+        "pulse",
+        stream::channel(20, |sender| async {
+            std::thread::spawn(move || thread(sender));
+            futures::future::pending().await
+        }),
+    )
 }
 
 pub fn thread(sender: futures::channel::mpsc::Sender<Event>) {

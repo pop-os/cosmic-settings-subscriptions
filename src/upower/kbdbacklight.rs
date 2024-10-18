@@ -5,6 +5,7 @@
 // started or restarted.
 
 use futures::{FutureExt, Stream, StreamExt};
+use iced_futures::Subscription;
 use std::{fmt::Debug, hash::Hash};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -13,7 +14,7 @@ use upower_dbus::{BrightnessChanged, KbdBacklightProxy};
 pub fn kbd_backlight_subscription<I: 'static + Hash + Copy + Send + Sync + Debug>(
     id: I,
 ) -> iced_futures::Subscription<KeyboardBacklightUpdate> {
-    iced_futures::subscription::run_with_id(
+    Subscription::run_with_id(
         id,
         async move {
             match events().await {

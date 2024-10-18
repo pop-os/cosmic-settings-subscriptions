@@ -6,9 +6,10 @@ use std::collections::HashMap;
 mod rfkill;
 
 use futures::{FutureExt, StreamExt};
+use iced_futures::Subscription;
 
 pub fn subscription() -> iced_futures::Subscription<bool> {
-    iced_futures::subscription::run_with_id(
+    Subscription::run_with_id(
         "airplane-mode",
         async {
             match rfkill::rfkill_updates() {

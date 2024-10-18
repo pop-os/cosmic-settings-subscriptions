@@ -4,11 +4,12 @@
 // XXX error handling?
 
 use futures::{FutureExt, StreamExt};
+use iced_futures::Subscription;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 pub fn subscription(connection: zbus::Connection) -> iced_futures::Subscription<Event> {
-    iced_futures::subscription::run_with_id(
+    Subscription::run_with_id(
         "settings-daemon",
         async move {
             let settings_daemon = match CosmicSettingsDaemonProxy::new(&connection).await {

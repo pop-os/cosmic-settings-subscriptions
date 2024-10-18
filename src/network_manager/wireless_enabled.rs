@@ -4,7 +4,7 @@
 use super::Event;
 use cosmic_dbus_networkmanager::nm::NetworkManager;
 use futures::{SinkExt, StreamExt};
-use iced_futures::subscription;
+use iced_futures::{stream, Subscription};
 use std::{fmt::Debug, hash::Hash};
 use zbus::Connection;
 
@@ -18,10 +18,13 @@ pub fn wireless_enabled_subscription<I: 'static + Hash + Copy + Send + Sync + De
     id: I,
     conn: Connection,
 ) -> iced_futures::Subscription<Event> {
-    subscription::channel(id, 50, move |output| async move {
-        watch(conn, output).await;
-        futures::future::pending().await
-    })
+    Subscription::run_with_id(
+        id,
+        stream::channel(50, move |output| async move {
+            watch(conn, output).await;
+            futures::future::pending().await
+        }),
+    )
 }
 
 pub async fn watch(conn: zbus::Connection, mut output: futures::channel::mpsc::Sender<Event>) {
