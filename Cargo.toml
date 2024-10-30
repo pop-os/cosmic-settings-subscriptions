@@ -5,7 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-cosmic-dbus-networkmanager = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
+cosmic-dbus-networkmanager = { git = "https://github.com/pop-os/dbus-settings-bindings", branch = "zbus5", optional = true }
 futures = "0.3.30"
 iced_futures = { git = "https://github.com/pop-os/libcosmic" }
 itertools = "0.13.0"
@@ -18,8 +18,8 @@ thiserror = "1.0.63"
 tokio = { version = "1.39.3", features = ["net", "process", "sync"] }
 tokio-stream = "0.1.15"
 tracing = "0.1.40"
-upower_dbus = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
-zbus = "4.4.0"
+upower_dbus = { git = "https://github.com/pop-os/dbus-settings-bindings", branch = "zbus5", optional = true }
+zbus = "5.0.0"
 
 [features]
 default = [
