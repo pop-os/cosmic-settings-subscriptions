@@ -1,7 +1,10 @@
 // Copyright 2024 System76 <info@system76.com>
 // SPDX-License-Identifier: MPL-2.0
 
-use cosmic_dbus_networkmanager::{device::wireless::WirelessDevice, interface::enums::DeviceState};
+use cosmic_dbus_networkmanager::{
+    device::wireless::WirelessDevice,
+    interface::enums::{ApFlags, DeviceState},
+};
 
 use futures::StreamExt;
 use itertools::Itertools;
@@ -55,6 +58,8 @@ pub async fn handle_wireless_device(device: WirelessDevice<'_>) -> zbus::Result<
                     state,
                     working: false,
                     path: ap.inner().path().to_owned(),
+                    secured: !ap.wpa_flags().await?.is_empty(),
+                    wps_push: ap.flags().await?.contains(ApFlags::WPS_PBC),
                 },
             );
         }
@@ -75,4 +80,6 @@ pub struct AccessPoint {
     pub state: DeviceState,
     pub working: bool,
     pub path: ObjectPath<'static>,
+    pub secured: bool,
+    pub wps_push: bool,
 }
