@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use zbus::zvariant::OwnedObjectPath;
 
 mod adapter;
+pub mod agent;
 mod device;
 pub mod subscription;
 
@@ -15,6 +17,7 @@ pub use device::*;
 pub enum Event {
     AddedAdapter(OwnedObjectPath, Adapter),
     AddedDevice(OwnedObjectPath, Device),
+    Agent(Arc<bluez_zbus::agent1::Message>),
     DBusError(String),
     DBusServiceUnknown,
     DeviceFailed(OwnedObjectPath),
