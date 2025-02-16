@@ -19,17 +19,20 @@ tokio = { version = "1.39.3", features = ["net", "process", "sync"] }
 tokio-stream = "0.1.15"
 tracing = "0.1.40"
 upower_dbus = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
+bluez-zbus = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
 zbus = "4.4.0"
 
 [features]
 default = [
     "airplane_mode",
+    "bluetooth",
     "network_manager",
     "pulse",
     "upower",
     "settings_daemon",
 ]
 airplane_mode = ["rustix"]
+bluetooth = ["dep:bluez-zbus"]
 network_manager = ["dep:cosmic-dbus-networkmanager", "dep:secure-string"]
 pipewire = ["dep:pipewire"]
 pulse = ["libpulse-binding"]

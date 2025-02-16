@@ -13,6 +13,9 @@ pub mod pipewire;
 #[cfg(feature = "pulse")]
 pub mod pulse;
 
+#[cfg(feature = "bluetooth")]
+pub mod bluetooth;
+
 #[cfg(feature = "settings_daemon")]
 pub mod settings_daemon;
 
