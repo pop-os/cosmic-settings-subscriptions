@@ -4,8 +4,10 @@
 use std::collections::HashMap;
 use zbus::zvariant::OwnedObjectPath;
 
+mod adapter;
 mod device;
 
+pub use adapter::*;
 pub use device::*;
 
 #[derive(Clone, Debug)]
@@ -13,6 +15,7 @@ pub enum Event {
     DBusError(String),
     DeviceFailed(OwnedObjectPath),
     Ok,
+    SetAdapters(HashMap<OwnedObjectPath, Adapter>),
     SetDevices(HashMap<OwnedObjectPath, Device>),
 }
 
