@@ -3,7 +3,7 @@
 
 use cosmic_dbus_networkmanager::{
     device::wireless::WirelessDevice,
-    interface::enums::{ApFlags, DeviceState},
+    interface::enums::{ApFlags, ApSecurityFlags, DeviceState},
 };
 
 use futures::StreamExt;
@@ -11,7 +11,12 @@ use itertools::Itertools;
 use std::{collections::HashMap, sync::Arc};
 use zbus::zvariant::ObjectPath;
 
-pub async fn handle_wireless_device(device: WirelessDevice<'_>) -> zbus::Result<Vec<AccessPoint>> {
+use super::hw_address::HwAddress;
+
+pub async fn handle_wireless_device(
+    device: WirelessDevice<'_>,
+    hw_address: Option<String>,
+) -> zbus::Result<Vec<AccessPoint>> {
     device.request_scan(HashMap::new()).await?;
 
     let mut scan_changed = device.receive_last_scan_changed().await;
@@ -50,6 +55,20 @@ pub async fn handle_wireless_device(device: WirelessDevice<'_>) -> zbus::Result<
                 }
             }
 
+            let Some(flags) = ap.cached_flags().unwrap_or_default() else {
+                continue;
+            };
+            let Some(flags) = ApSecurityFlags::from_bits(flags) else {
+                continue;
+            };
+            let network_type = if flags.intersects(ApSecurityFlags::KEY_MGMT_802_1X) {
+                NetworkType::EAP
+            } else if flags.intersects(ApSecurityFlags::KEY_MGMTPSK) {
+                NetworkType::PSK
+            } else {
+                NetworkType::Open
+            };
+
             aps.insert(
                 ssid.clone(),
                 AccessPoint {
@@ -60,6 +79,11 @@ pub async fn handle_wireless_device(device: WirelessDevice<'_>) -> zbus::Result<
                     path: ap.inner().path().to_owned(),
                     secured: !ap.wpa_flags().await?.is_empty(),
                     wps_push: ap.flags().await?.contains(ApFlags::WPS_PBC),
+                    network_type,
+                    hw_address: hw_address
+                        .as_ref()
+                        .and_then(|str_addr| HwAddress::from_str(str_addr))
+                        .unwrap_or_default(),
                 },
             );
         }
@@ -80,6 +104,18 @@ pub struct AccessPoint {
     pub state: DeviceState,
     pub working: bool,
     pub path: ObjectPath<'static>,
+    pub hw_address: HwAddress,
     pub secured: bool,
     pub wps_push: bool,
+    pub network_type: NetworkType,
+}
+
+// TODO do we want to support eap methods other than peap in the applet?
+// Then we'd need a dropdown for the eap method,
+// and tls requires a cert instead of a password
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkType {
+    Open,
+    PSK,
+    EAP,
 }

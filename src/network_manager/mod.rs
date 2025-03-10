@@ -5,10 +5,12 @@ pub mod active_conns;
 pub mod available_wifi;
 pub mod current_networks;
 pub mod devices;
+pub mod hw_address;
 pub mod wireless_enabled;
 
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 
+use available_wifi::NetworkType;
 pub use cosmic_dbus_networkmanager as dbus;
 pub use dbus::settings::connection::Settings;
 
@@ -26,6 +28,7 @@ use futures::{
     channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
     FutureExt, SinkExt, StreamExt,
 };
+use hw_address::HwAddress;
 use iced_futures::{stream, Subscription};
 use secure_string::SecureString;
 use tokio::process::Command;
@@ -289,15 +292,31 @@ async fn start_listening(
                         .await;
                 }
 
-                Some(Request::Password(ssid, password)) => {
+                Some(Request::Authenticate {
+                    ssid,
+                    identity,
+                    password,
+                    hw_address,
+                }) => {
                     let nm_state = NetworkManagerState::new(&conn).await.unwrap_or_default();
                     let success = nm_state
-                        .connect_wifi(&conn, &ssid, Some(password.unsecure()))
+                        .connect_wifi(
+                            &conn,
+                            &ssid,
+                            identity.as_deref(),
+                            Some(password.unsecure()),
+                            hw_address,
+                        )
                         .await
                         .is_ok();
 
                     let status = Some(Event::RequestResponse {
-                        req: Request::Password(ssid.clone(), password.clone()),
+                        req: Request::Authenticate {
+                            ssid: ssid.clone(),
+                            identity: identity.clone(),
+                            password: password.clone(),
+                            hw_address,
+                        },
                         success,
                         state: NetworkManagerState::new(&conn).await.unwrap_or_default(),
                     });
@@ -305,24 +324,44 @@ async fn start_listening(
                     if let Some(e) = status {
                         _ = output.send(e).await;
                     } else {
-                        _ = request_response(&conn, Request::Password(ssid, password), success)
-                            .then(|event| output.send(event))
+                        _ = output
+                            .send(Event::RequestResponse {
+                                req: Request::Authenticate {
+                                    ssid,
+                                    identity,
+                                    password,
+                                    hw_address,
+                                },
+                                success: false,
+                                state: NetworkManagerState::new(&conn).await.unwrap_or_default(),
+                            })
                             .await;
                     }
                 }
 
-                Some(Request::SelectAccessPoint(ssid)) => {
+                Some(Request::SelectAccessPoint(ssid, hw_address, network_type)) => {
+                    // wait for identity before attempting to connect.
+                    if matches!(network_type, NetworkType::EAP) {
+                        return State::Waiting(conn, rx);
+                    }
                     let state = NetworkManagerState::new(&conn).await.unwrap_or_default();
-                    let success = if let Err(err) = state.connect_wifi(&conn, &ssid, None).await {
+                    let success = if let Err(err) = state
+                        .connect_wifi(&conn, &ssid, None, None, hw_address)
+                        .await
+                    {
                         tracing::error!("Failed to connect to access point: {:?}", err);
                         false
                     } else {
                         true
                     };
 
-                    _ = request_response(&conn, Request::SelectAccessPoint(ssid.clone()), success)
-                        .then(|event| output.send(event))
-                        .await;
+                    _ = request_response(
+                        &conn,
+                        Request::SelectAccessPoint(ssid.clone(), hw_address, network_type),
+                        success,
+                    )
+                    .then(|event| output.send(event))
+                    .await;
                 }
 
                 Some(Request::Activate(device_path, connection_path)) => {
@@ -466,13 +505,18 @@ pub enum Request {
     /// Forget a known access point.
     Forget(SSID),
     /// Create a connection to a new access point.
-    Password(SSID, SecureString),
+    Authenticate {
+        ssid: String,
+        identity: Option<String>,
+        password: SecureString,
+        hw_address: HwAddress,
+    },
     /// Signal to reload the service.
     Reload,
     /// Remove a connection profile.
     Remove(UUID),
     /// Connect to a known access point.
-    SelectAccessPoint(SSID),
+    SelectAccessPoint(SSID, HwAddress, NetworkType),
     /// Toggle airplaine mode.
     SetAirplaneMode(bool),
     /// Toggle WiFi enablement.
@@ -597,7 +641,7 @@ impl NetworkManagerState {
                         if let Ok(Some(SpecificDevice::Wireless(wireless_device))) =
                             device.downcast_to_device().await
                         {
-                            handle_wireless_device(wireless_device)
+                            handle_wireless_device(wireless_device, device.hw_address().await.ok())
                                 .await
                                 .unwrap_or_default()
                         } else {
@@ -664,7 +708,9 @@ impl NetworkManagerState {
         &self,
         conn: &zbus::Connection,
         ssid: &str,
+        identity: Option<&str>,
         password: Option<&str>,
+        hw_address: HwAddress,
     ) -> Result<(), Error> {
         let nm = NetworkManager::new(conn).await?;
 
@@ -682,7 +728,7 @@ impl NetworkManagerState {
         let Some(ap) = self
             .wireless_access_points
             .iter()
-            .find(|ap| ap.ssid.as_ref() == ssid)
+            .find(|ap| ap.ssid.as_ref() == ssid && ap.hw_address == hw_address)
         else {
             return Err(Error::AccessPointNotFound);
         };
@@ -700,8 +746,23 @@ impl NetworkManagerState {
                 ]),
             ),
         ]);
-
-        if let Some(pass) = password {
+        if let Some(identity) = identity {
+            conn_settings.insert(
+                "802-1x",
+                HashMap::from([
+                    ("identity", Value::Str(identity.into())),
+                    // most common default
+                    ("eap", Value::Str("peap".into())),
+                    // most common default
+                    ("phase2-auth", Value::Str("mschapv2".into())),
+                    ("password", Value::Str(password.unwrap_or("").into())),
+                ]),
+            );
+            conn_settings.insert(
+                "802-11-wireless-security",
+                HashMap::from([("key-mgmt", Value::Str("wpa-eap".into()))]),
+            );
+        } else if let Some(pass) = password {
             conn_settings.insert(
                 "802-11-wireless-security",
                 HashMap::from([
