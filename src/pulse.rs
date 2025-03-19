@@ -256,10 +256,10 @@ impl Data {
                             .as_ref()
                             .map(Cow::to_string)
                             .unwrap_or_default(),
-                        direction: match port.direction {
-                            libpulse_binding::direction::FlagSet::INPUT => Direction::Input,
-                            libpulse_binding::direction::FlagSet::OUTPUT => Direction::Output,
-                            _ => Direction::Both,
+                        direction: match port.direction.bits() {
+                            x if x == libpulse_binding::direction::FlagSet::INPUT.bits() => Direction::Input,
+                            x if x == libpulse_binding::direction::FlagSet::OUTPUT.bits() => Direction::Output,
+                            _ => Direction::Both
                         },
                         port_type: match port.proplist.get_str("port.type").as_deref() {
                             Some("analog") => PortType::Analog,
