@@ -137,9 +137,14 @@ pub enum Event {
     SourceMute(bool),
 }
 
+enum Request {
+    Volume(u32, f32),
+    Balance(u32, f32),
+}
+
 #[derive(Clone, Debug)]
 pub struct PulseChannels {
-    tx: mpsc::Sender<(u32, f32)>,
+    tx: mpsc::Sender<Request>,
     pipe_tx: Arc<os_pipe::PipeWriter>,
     index: u32,
 }
@@ -158,26 +163,47 @@ extern "C" fn handle_balance(
         Context,
         ChannelVolumes,
         Map,
-        std::sync::mpsc::Receiver<(u32, f32)>,
+        std::sync::mpsc::Receiver<Request>,
     )> = unsafe { Box::from_raw(data as _) };
     let (ctx, volumes, map, rx) = boxed.as_mut();
     match res {
         Ok(_) => {
             _ = f.into_raw_fd();
-            while let Ok((index, new_balance)) = rx.try_recv() {
-                if map.can_balance() {
-                    if let Some(v) = volumes.set_balance(&map, new_balance) {
+            while let Ok(req) = rx.try_recv() {
+                match req {
+                    Request::Volume(index, volume_scale) => {
                         let mut intro = ctx.introspect();
 
-                        _ = intro.set_sink_volume_by_index(
-                            index,
-                            v,
-                            Some(Box::new(|success| {
-                                if !success {
-                                    tracing::error!("Failed to set sink balance");
-                                }
-                            })),
-                        );
+                        let new_scale =
+                            Volume((volume_scale * Volume::NORMAL.0 as f32).round() as u32);
+                        if let Some(v) = volumes.scale(new_scale) {
+                            _ = intro.set_sink_volume_by_index(
+                                index,
+                                &v,
+                                Some(Box::new(|success| {
+                                    if !success {
+                                        tracing::error!("Failed to set sink balance");
+                                    }
+                                })),
+                            );
+                        }
+                    }
+                    Request::Balance(index, new_balance) => {
+                        if map.can_balance() {
+                            if let Some(v) = volumes.set_balance(&map, new_balance) {
+                                let mut intro = ctx.introspect();
+
+                                _ = intro.set_sink_volume_by_index(
+                                    index,
+                                    v,
+                                    Some(Box::new(|success| {
+                                        if !success {
+                                            tracing::error!("Failed to set sink balance");
+                                        }
+                                    })),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -197,7 +223,7 @@ impl PulseChannels {
         index: u32,
         ctx: Context,
     ) -> PulseChannels {
-        let (tx, rx) = mpsc::channel::<(u32, f32)>();
+        let (tx, rx) = mpsc::channel::<Request>();
         let (reader, writer) = os_pipe::pipe().expect("Failed to create pipe");
         let reader_fd = reader.into_raw_fd();
         let boxed_rx = Box::new((ctx, volumes.clone(), map.clone(), rx));
@@ -211,7 +237,7 @@ impl PulseChannels {
                 Context,
                 ChannelVolumes,
                 Map,
-                std::sync::mpsc::Receiver<(u32, f32)>,
+                std::sync::mpsc::Receiver<Request>,
             )>::into_raw(boxed_rx) as *mut c_void,
         );
 
@@ -235,8 +261,20 @@ impl PulseChannels {
             tracing::error!("Failed to get pipe for balance");
             return;
         };
-        if let Err(err) = self.tx.send((self.index, balance)) {
+        if let Err(err) = self.tx.send(Request::Balance(self.index, balance)) {
             tracing::error!("Failed to send new balance to channel. {err:?}");
+        } else {
+            pipe.write_all(&[1]).unwrap();
+        }
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        let Some(pipe) = Arc::get_mut(&mut self.pipe_tx) else {
+            tracing::error!("Failed to get pipe for volume");
+            return;
+        };
+        if let Err(err) = self.tx.send(Request::Volume(self.index, volume)) {
+            tracing::error!("Failed to send new volume to channel. {err:?}");
         } else {
             pipe.write_all(&[1]).unwrap();
         }
