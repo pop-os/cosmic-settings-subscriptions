@@ -8,19 +8,30 @@ use futures::{executor::block_on, SinkExt};
 use iced_futures::{stream, Subscription};
 use libpulse_binding::{
     callbacks::ListResult,
+    channelmap::Map,
     context::{
         introspect::{CardInfo, CardProfileInfo, Introspector, ServerInfo, SinkInfo, SourceInfo},
         subscribe::{Facility, InterestMaskSet, Operation},
         Context, FlagSet, State,
     },
     def::Retval,
-    mainloop::standard::{IterateResult, Mainloop},
-    volume::Volume,
+    mainloop::{
+        api::MainloopApi,
+        events::io::IoEventInternal,
+        standard::{IterateResult, Mainloop},
+    },
+    volume::{ChannelVolumes, Volume},
 };
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
+    io::{Read, Write},
+    os::{
+        fd::{FromRawFd, IntoRawFd, RawFd},
+        raw::c_void,
+    },
     rc::Rc,
+    sync::{mpsc, Arc},
 };
 
 pub fn subscription() -> iced_futures::Subscription<Event> {
@@ -115,13 +126,121 @@ pub fn thread(sender: futures::channel::mpsc::Sender<Event>) {
 
 #[derive(Clone, Debug)]
 pub enum Event {
+    Balance(Option<f32>),
     CardInfo(Card),
     DefaultSink(String),
     DefaultSource(String),
     SinkVolume(u32),
+    Channels(PulseChannels),
     SinkMute(bool),
     SourceVolume(u32),
     SourceMute(bool),
+}
+
+#[derive(Clone, Debug)]
+pub struct PulseChannels {
+    tx: mpsc::Sender<(u32, f32)>,
+    pipe_tx: Arc<os_pipe::PipeWriter>,
+    index: u32,
+}
+
+extern "C" fn handle_balance(
+    api: *const MainloopApi,
+    event: *mut IoEventInternal,
+    fd: RawFd,
+    _flags: libpulse_binding::mainloop::events::io::FlagSet,
+    data: *mut c_void,
+) {
+    let mut buf = [0u8; 1];
+    let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
+    let res = f.read_exact(&mut buf);
+    let mut boxed: Box<(
+        Context,
+        ChannelVolumes,
+        Map,
+        std::sync::mpsc::Receiver<(u32, f32)>,
+    )> = unsafe { Box::from_raw(data as _) };
+    let (ctx, volumes, map, rx) = boxed.as_mut();
+    match res {
+        Ok(_) => {
+            _ = f.into_raw_fd();
+            while let Ok((index, new_balance)) = rx.try_recv() {
+                if map.can_balance() {
+                    if let Some(v) = volumes.set_balance(&map, new_balance) {
+                        let mut intro = ctx.introspect();
+
+                        _ = intro.set_sink_volume_by_index(
+                            index,
+                            v,
+                            Some(Box::new(|success| {
+                                if !success {
+                                    tracing::error!("Failed to set sink balance");
+                                }
+                            })),
+                        );
+                    }
+                }
+            }
+            let _ = Box::leak(boxed);
+        }
+        Err(_) => {
+            (unsafe { &*api }).io_free.as_ref().unwrap()(event);
+        }
+    };
+}
+
+impl PulseChannels {
+    fn new(
+        volumes: ChannelVolumes,
+        map: Map,
+        api: &MainloopApi,
+        index: u32,
+        ctx: Context,
+    ) -> PulseChannels {
+        let (tx, rx) = mpsc::channel::<(u32, f32)>();
+        let (reader, writer) = os_pipe::pipe().expect("Failed to create pipe");
+        let reader_fd = reader.into_raw_fd();
+        let boxed_rx = Box::new((ctx, volumes.clone(), map.clone(), rx));
+        let api_ptr: *const _ = api;
+        let event_source = api.io_new.as_ref().unwrap()(
+            api_ptr,
+            reader_fd,
+            libpulse_binding::mainloop::events::io::FlagSet::INPUT,
+            Some(handle_balance),
+            Box::<(
+                Context,
+                ChannelVolumes,
+                Map,
+                std::sync::mpsc::Receiver<(u32, f32)>,
+            )>::into_raw(boxed_rx) as *mut c_void,
+        );
+
+        if let Some(enable) = api.io_enable.as_ref() {
+            enable(
+                event_source,
+                libpulse_binding::mainloop::events::io::FlagSet::INPUT,
+            );
+        }
+        Self {
+            tx,
+            pipe_tx: Arc::new(writer),
+            index,
+        }
+    }
+}
+
+impl PulseChannels {
+    pub fn set_balance(&mut self, balance: f32) {
+        let Some(pipe) = Arc::get_mut(&mut self.pipe_tx) else {
+            tracing::error!("Failed to get pipe for balance");
+            return;
+        };
+        if let Err(err) = self.tx.send((self.index, balance)) {
+            tracing::error!("Failed to send new balance to channel. {err:?}");
+        } else {
+            pipe.write_all(&[1]).unwrap();
+        }
+    }
 }
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -257,9 +376,13 @@ impl Data {
                             .map(Cow::to_string)
                             .unwrap_or_default(),
                         direction: match port.direction.bits() {
-                            x if x == libpulse_binding::direction::FlagSet::INPUT.bits() => Direction::Input,
-                            x if x == libpulse_binding::direction::FlagSet::OUTPUT.bits() => Direction::Output,
-                            _ => Direction::Both
+                            x if x == libpulse_binding::direction::FlagSet::INPUT.bits() => {
+                                Direction::Input
+                            }
+                            x if x == libpulse_binding::direction::FlagSet::OUTPUT.bits() => {
+                                Direction::Output
+                            }
+                            _ => Direction::Both,
                         },
                         port_type: match port.proplist.get_str("port.type").as_deref() {
                             Some("analog") => PortType::Analog,
@@ -332,7 +455,11 @@ impl Data {
             if sink_info.name.as_deref() != self.default_sink_name.borrow().as_deref() {
                 return;
             }
-            let volume = sink_info.volume.avg().0 / (Volume::NORMAL.0 / 100);
+            let balance = (sink_info.channel_map.can_balance()
+                && sink_info.base_volume.is_normal())
+            .then(|| sink_info.volume.get_balance(&sink_info.channel_map));
+
+            let volume = sink_info.volume.max().0 / (Volume::NORMAL.0 / 100);
             if self.sink_mute.get() != Some(sink_info.mute) {
                 self.sink_mute.set(Some(sink_info.mute));
                 if block_on(
@@ -351,6 +478,25 @@ impl Data {
                     self.main_loop.borrow_mut().quit(Retval(0));
                 }
             }
+            if block_on(self.sender.borrow_mut().send(Event::Balance(balance))).is_err() {
+                self.main_loop.borrow_mut().quit(Retval(0));
+            }
+            let main_loop = self.main_loop.borrow();
+            let api = main_loop.get_api();
+            if let Some(mut ctx) = Context::new(&*main_loop, "balance") {
+                let _ = ctx.connect(None, FlagSet::NOFAIL, None);
+
+                let channels = PulseChannels::new(
+                    sink_info.volume,
+                    sink_info.channel_map,
+                    api,
+                    sink_info.index,
+                    ctx,
+                );
+                if block_on(self.sender.borrow_mut().send(Event::Channels(channels))).is_err() {
+                    self.main_loop.borrow_mut().quit(Retval(0));
+                }
+            }
         }
     }
 
@@ -359,7 +505,7 @@ impl Data {
             if source_info.name.as_deref() != self.default_source_name.borrow().as_deref() {
                 return;
             }
-            let volume = source_info.volume.avg().0 / (Volume::NORMAL.0 / 100);
+            let volume = source_info.volume.max().0 / (Volume::NORMAL.0 / 100);
             if self.source_mute.get() != Some(source_info.mute) {
                 self.source_mute.set(Some(source_info.mute));
                 if block_on(
