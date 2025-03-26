@@ -166,6 +166,11 @@ extern "C" fn handle_balance(
         std::sync::mpsc::Receiver<Request>,
     )> = unsafe { Box::from_raw(data as _) };
     let (ctx, volumes, map, rx) = boxed.as_mut();
+    if ctx.get_state() != State::Ready {
+        _ = f.into_raw_fd();
+        let _ = Box::leak(boxed);
+        return;
+    }
     match res {
         Ok(_) => {
             _ = f.into_raw_fd();
