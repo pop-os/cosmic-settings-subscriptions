@@ -524,7 +524,7 @@ impl Data {
             if block_on(self.sender.borrow_mut().send(Event::Balance(balance))).is_err() {
                 self.main_loop.borrow_mut().quit(Retval(0));
             }
-            let main_loop = self.main_loop.borrow();
+            let mut main_loop = self.main_loop.borrow_mut();
             let api = main_loop.get_api();
             if let Some(mut ctx) = Context::new(&*main_loop, "balance") {
                 let _ = ctx.connect(None, FlagSet::NOFAIL, None);
@@ -537,7 +537,7 @@ impl Data {
                     ctx,
                 );
                 if block_on(self.sender.borrow_mut().send(Event::Channels(channels))).is_err() {
-                    self.main_loop.borrow_mut().quit(Retval(0));
+                    main_loop.quit(Retval(0));
                 }
             }
         }
