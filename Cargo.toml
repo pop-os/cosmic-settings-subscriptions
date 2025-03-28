@@ -21,7 +21,6 @@ tracing = "0.1.40"
 upower_dbus = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
 bluez-zbus = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
 zbus = "4.4.0"
-os_pipe = { version = "1.2.1", optional = true }
 
 [features]
 default = [
@@ -36,7 +35,7 @@ airplane_mode = ["rustix", "rustix/fs"]
 bluetooth = ["dep:bluez-zbus"]
 network_manager = ["dep:cosmic-dbus-networkmanager", "dep:secure-string"]
 pipewire = ["dep:pipewire"]
-pulse = ["libpulse-binding", "os_pipe"]
+pulse = ["libpulse-binding", "rustix", "rustix/pipe"]
 upower = ["upower_dbus"]
 settings_daemon = []
 
