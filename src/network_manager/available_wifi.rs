@@ -55,18 +55,17 @@ pub async fn handle_wireless_device(
                 }
             }
 
-            let Some(flags) = ap.cached_flags().unwrap_or_default() else {
-                continue;
-            };
-            let Some(flags) = ApSecurityFlags::from_bits(flags) else {
+            let Ok(flags) = ap.rsn_flags().await else {
                 continue;
             };
             let network_type = if flags.intersects(ApSecurityFlags::KEY_MGMT_802_1X) {
                 NetworkType::EAP
             } else if flags.intersects(ApSecurityFlags::KEY_MGMTPSK) {
                 NetworkType::PSK
-            } else {
+            } else if flags.is_empty() {
                 NetworkType::Open
+            } else {
+                continue;
             };
 
             aps.insert(

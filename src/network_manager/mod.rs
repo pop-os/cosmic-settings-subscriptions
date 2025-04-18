@@ -310,38 +310,23 @@ async fn start_listening(
                         .await
                         .is_ok();
 
-                    let status = Some(Event::RequestResponse {
-                        req: Request::Authenticate {
-                            ssid: ssid.clone(),
-                            identity: identity.clone(),
-                            password: password.clone(),
-                            hw_address,
-                        },
-                        success,
-                        state: NetworkManagerState::new(&conn).await.unwrap_or_default(),
-                    });
-
-                    if let Some(e) = status {
-                        _ = output.send(e).await;
-                    } else {
-                        _ = output
-                            .send(Event::RequestResponse {
-                                req: Request::Authenticate {
-                                    ssid,
-                                    identity,
-                                    password,
-                                    hw_address,
-                                },
-                                success: false,
-                                state: NetworkManagerState::new(&conn).await.unwrap_or_default(),
-                            })
-                            .await;
-                    }
+                    _ = output
+                        .send(Event::RequestResponse {
+                            req: Request::Authenticate {
+                                ssid: ssid.clone(),
+                                identity: identity.clone(),
+                                password: password.clone(),
+                                hw_address,
+                            },
+                            success,
+                            state: NetworkManagerState::new(&conn).await.unwrap_or_default(),
+                        })
+                        .await;
                 }
 
                 Some(Request::SelectAccessPoint(ssid, hw_address, network_type)) => {
                     // wait for identity before attempting to connect.
-                    if matches!(network_type, NetworkType::EAP) {
+                    if !matches!(network_type, NetworkType::Open) {
                         return State::Waiting(conn, rx);
                     }
                     let state = NetworkManagerState::new(&conn).await.unwrap_or_default();
@@ -752,12 +737,15 @@ impl NetworkManagerState {
                 HashMap::from([
                     ("identity", Value::Str(identity.into())),
                     // most common default
-                    ("eap", Value::Str("peap".into())),
+                    ("eap", Value::Array(vec!["peap"].into())),
                     // most common default
                     ("phase2-auth", Value::Str("mschapv2".into())),
                     ("password", Value::Str(password.unwrap_or("").into())),
                 ]),
             );
+            let wireless = conn_settings.get_mut("802-11-wireless").unwrap();
+            wireless.insert("security", Value::Str("802-11-wireless-security".into()));
+            wireless.insert("mode", Value::Str("infrastructure".into()));
             conn_settings.insert(
                 "802-11-wireless-security",
                 HashMap::from([("key-mgmt", Value::Str("wpa-eap".into()))]),
@@ -825,31 +813,31 @@ impl NetworkManagerState {
                     .unwrap();
                 ActiveConnection::from(active)
             };
-
+            let mut changes = active_conn.receive_state_changed().await;
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            let mut state =
-                enums::ActiveConnectionState::from(active_conn.state().await.unwrap_or_default());
-            return match state {
-                ActiveConnectionState::Activating => {
-                    if let Ok(Some(s)) = tokio::time::timeout(
-                        Duration::from_secs(20),
-                        active_conn.receive_state_changed().await.next(),
-                    )
-                    .await
-                    {
-                        state = s.get().await.unwrap_or_default().into();
-                        if matches!(state, enums::ActiveConnectionState::Activated) {
-                            Ok(())
-                        } else {
-                            Err(Error::ConnectionActivate)
-                        }
-                    } else {
-                        Err(Error::ConnectionActivate)
-                    }
+            let mut count = 5;
+            loop {
+                let state = active_conn.state().await;
+                if let Ok(enums::ActiveConnectionState::Activated) = state {
+                    return Ok(());
+                } else if let Ok(enums::ActiveConnectionState::Deactivated) = state {
+                    return Err(Error::ConnectionActivate);
                 }
-                ActiveConnectionState::Activated => Ok(()),
-                _ => Err(Error::ConnectionActivate),
-            };
+                match tokio::time::timeout(Duration::from_secs(20), changes.next()).await {
+                    Ok(Some(s)) => {
+                        let state = s.get().await.unwrap_or_default().into();
+                        if matches!(state, enums::ActiveConnectionState::Activated) {
+                            return Ok(());
+                        }
+                    }
+                    _ => {}
+                };
+
+                count -= 1;
+                if count <= 0 {
+                    return Err(Error::ConnectionActivate);
+                }
+            }
         }
 
         Err(Error::NoWiFiDevices)
