@@ -18,7 +18,7 @@ pub enum Event {
     AddedAdapter(OwnedObjectPath, Adapter),
     AddedDevice(OwnedObjectPath, Device),
     Agent(Arc<bluez_zbus::agent1::Message>),
-    DBusError(String),
+    DBusError(zbus::Error),
     DBusServiceUnknown,
     DeviceFailed(OwnedObjectPath),
     Ok,

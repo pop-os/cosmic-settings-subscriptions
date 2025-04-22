@@ -198,7 +198,7 @@ pub async fn watch(connection: zbus::Connection, mut tx: futures::channel::mpsc:
         }.await;
 
         if let Err(why) = result {
-            _ = tx.send(Event::DBusError(why.to_string())).await;
+            _ = tx.send(Event::DBusError(why.clone())).await;
 
             tracing::error!("failed to watch bluetooth event: {why}.");
 
