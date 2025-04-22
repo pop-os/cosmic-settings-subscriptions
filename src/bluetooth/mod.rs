@@ -22,6 +22,7 @@ pub enum Event {
     DBusServiceUnknown,
     DeviceFailed(OwnedObjectPath),
     Ok,
+    NameHasNoOwner,
     RemovedAdapter(OwnedObjectPath),
     RemovedDevice(OwnedObjectPath),
     SetAdapters(HashMap<OwnedObjectPath, Adapter>),

@@ -200,7 +200,7 @@ pub async fn watch(connection: zbus::Connection, mut tx: futures::channel::mpsc:
         if let Err(why) = result {
             _ = tx.send(Event::DBusError(why.clone())).await;
 
-            tracing::error!("failed to watch bluetooth event: {why}.");
+            tracing::error!("failed to watch bluetooth event: {why:?}.");
 
             // Exit if the dbus service is not found.
             if let zbus::Error::FDO(fdo_error) = why {
@@ -210,6 +210,12 @@ pub async fn watch(connection: zbus::Connection, mut tx: futures::channel::mpsc:
                             "The org.bluez dbus service is unknown. Is the bluez service installed and activatable?"
                         );
                         _ = tx.send(Event::DBusServiceUnknown).await;
+                        return;
+                    }
+
+                    fdo::Error::NameHasNoOwner(_) => {
+                        tracing::error!("The org.bluez dbus service is not enabled or active");
+                        _ = tx.send(Event::NameHasNoOwner).await;
                         return;
                     }
 
