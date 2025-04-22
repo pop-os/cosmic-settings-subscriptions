@@ -140,7 +140,7 @@ pub async fn start_discovery(connection: zbus::Connection, adapter_path: OwnedOb
     let adapter = match bluez_zbus::get_adapter(&connection, adapter_path).await {
         Err(why) => {
             tracing::error!("Unable to get the adapter: {why}");
-            return Event::DBusError(why.to_string());
+            return Event::DBusError(why);
         }
         Ok(adapter) => adapter,
     };
@@ -168,7 +168,7 @@ pub async fn start_discovery(connection: zbus::Connection, adapter_path: OwnedOb
     }
 
     if let Err(why) = result {
-        Event::DBusError(why.to_string())
+        Event::DBusError(why)
     } else {
         Event::Ok
     }
@@ -178,7 +178,7 @@ pub async fn stop_discovery(connection: zbus::Connection, adapter_path: OwnedObj
     let result: zbus::Result<()> = Ok(());
 
     let adapter = match bluez_zbus::get_adapter(&connection, adapter_path).await {
-        Err(why) => return Event::DBusError(format!("Unable to get the adapter: {why}")),
+        Err(why) => return Event::DBusError(why),
         Ok(adapter) => adapter,
     };
 
@@ -207,7 +207,7 @@ pub async fn stop_discovery(connection: zbus::Connection, adapter_path: OwnedObj
     }
 
     if let Err(why) = result {
-        return Event::DBusError(why.to_string());
+        return Event::DBusError(why);
     }
     Event::Ok
 }
@@ -242,7 +242,7 @@ pub async fn change_adapter_status(
 
     if let Err(why) = result {
         tracing::error!("Failed to change the adapter state!");
-        return Event::DBusError(why.to_string());
+        return Event::DBusError(why);
     }
 
     Event::Ok
@@ -267,7 +267,7 @@ pub async fn get_adapters(connection: zbus::Connection) -> Event {
         Ok(adapters) => Event::SetAdapters(adapters),
         Err(why) => {
             tracing::error!("dbus connection failed. {why}");
-            Event::DBusError(why.to_string())
+            Event::DBusError(why)
         }
     }
 }

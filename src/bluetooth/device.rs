@@ -330,7 +330,7 @@ pub async fn get_devices(connection: zbus::Connection, adapter_path: OwnedObject
         Ok(devices) => Event::SetDevices(devices),
         Err(why) => {
             tracing::error!("zbus connection failed. {why}");
-            Event::DBusError(why.to_string())
+            Event::DBusError(why)
         }
     }
 }
