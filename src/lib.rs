@@ -21,3 +21,6 @@ pub mod settings_daemon;
 
 #[cfg(feature = "upower")]
 pub mod upower;
+
+#[cfg(feature = "accessibility")]
+pub mod accessibility;
