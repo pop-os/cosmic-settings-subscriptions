@@ -7,6 +7,10 @@ license = "MPL-2.0"
 [dependencies]
 cosmic-dbus-networkmanager = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
 cosmic-dbus-a11y = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
+cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", optional = true }
+num-derive = { version = "0.4", optional = true }
+num-traits = { version = "0.2", optional = true }
+sctk = { git = "https://github.com/smithay/client-toolkit/", package = "smithay-client-toolkit", optional = true }
 futures = "0.3.30"
 iced_futures = { git = "https://github.com/pop-os/libcosmic" }
 itertools = "0.14.0"
@@ -28,12 +32,14 @@ default = [
     "accessibility",
     "airplane_mode",
     "bluetooth",
+    "cosmic_a11y_manager",
     "network_manager",
     "pulse",
     "upower",
     "settings_daemon",
 ]
 accessibility = ["cosmic-dbus-a11y"]
+cosmic_a11y_manager = ["cosmic-protocols", "num-derive", "num-traits", "sctk"]
 airplane_mode = ["rustix", "rustix/fs"]
 bluetooth = ["dep:bluez-zbus"]
 network_manager = ["dep:cosmic-dbus-networkmanager", "dep:secure-string"]
