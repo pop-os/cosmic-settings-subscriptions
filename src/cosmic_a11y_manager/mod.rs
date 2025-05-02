@@ -1,4 +1,4 @@
-use cosmic_protocols::a11y::v1::client::cosmic_a11y_manager_v1;
+use cosmic_protocols::a11y::v1::client::cosmic_a11y_manager_v1::{self, ActiveState};
 use num_derive::{FromPrimitive, ToPrimitive};
 use sctk::{
     reexports::{
@@ -63,7 +63,7 @@ pub fn spawn_wayland_connection() -> Result<
     let conn = Connection::connect_to_env()?;
 
     std::thread::spawn(move || {
-        if let Err(err) = wayland_thread(conn, event_tx.clone(), request_rx) {
+        if let Err(err) = wayland_thread(conn, event_tx.clone(), request_rx, 1) {
             tracing::warn!("Accessibility protocol wayland thread crashed: {}", err);
             let _ = event_tx.blocking_send(AccessibilityEvent::Closed);
         }
@@ -76,6 +76,7 @@ fn wayland_thread(
     conn: Connection,
     tx: mpsc::Sender<AccessibilityEvent>,
     rx: channel::Channel<AccessibilityRequest>,
+    a11y_manager_min: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     struct State {
         loop_signal: LoopSignal,
@@ -149,6 +150,51 @@ fn wayland_thread(
                         state.screen_filter = filter;
                     }
                 }
+                cosmic_a11y_manager_v1::Event::ScreenFilter2 {
+                    inverted,
+                    filter,
+                    filter_state,
+                } => {
+                    let inverted = inverted
+                        .into_result()
+                        .unwrap_or(cosmic_a11y_manager_v1::ActiveState::Disabled)
+                        == cosmic_a11y_manager_v1::ActiveState::Enabled;
+                    let filter = if matches!(filter_state, WEnum::Value(ActiveState::Enabled)) {
+                        match filter {
+                            WEnum::Value(cosmic_a11y_manager_v1::Filter::Disabled) => {
+                                unreachable!()
+                            }
+                            WEnum::Value(cosmic_a11y_manager_v1::Filter::Greyscale) => {
+                                Some(ColorFilter::Greyscale)
+                            }
+                            WEnum::Value(cosmic_a11y_manager_v1::Filter::DaltonizeProtanopia) => {
+                                Some(ColorFilter::Protanopia)
+                            }
+                            WEnum::Value(cosmic_a11y_manager_v1::Filter::DaltonizeDeuteranopia) => {
+                                Some(ColorFilter::Deuteranopia)
+                            }
+                            WEnum::Value(cosmic_a11y_manager_v1::Filter::DaltonizeTritanopia) => {
+                                Some(ColorFilter::Tritanopia)
+                            }
+                            WEnum::Value(_) | WEnum::Unknown(_) => Some(ColorFilter::Unknown),
+                        }
+                    } else {
+                        None
+                    };
+
+                    if inverted != state.screen_inverted || filter != state.screen_filter {
+                        if state
+                            .tx
+                            .blocking_send(AccessibilityEvent::ScreenFilter { inverted, filter })
+                            .is_err()
+                        {
+                            state.loop_signal.stop();
+                            state.loop_signal.wakeup();
+                        };
+                        state.screen_inverted = inverted;
+                        state.screen_filter = filter;
+                    }
+                }
                 _ => unreachable!(),
             }
         }
@@ -179,7 +225,7 @@ fn wayland_thread(
     let registry_state = RegistryState::new(&globals);
     let Ok(global) = registry_state.bind_one::<cosmic_a11y_manager_v1::CosmicA11yManagerV1, _, _>(
         &qhandle,
-        1..=2,
+        a11y_manager_min..=3,
         (),
     ) else {
         return Ok(());
@@ -197,27 +243,48 @@ fn wayland_thread(
                 });
             }
             channel::Event::Msg(AccessibilityRequest::ScreenFilter { inverted, filter }) => {
-                state.global.set_screen_filter(
-                    if inverted {
-                        cosmic_a11y_manager_v1::ActiveState::Enabled
-                    } else {
-                        cosmic_a11y_manager_v1::ActiveState::Disabled
-                    },
-                    match filter {
-                        None => cosmic_a11y_manager_v1::Filter::Disabled,
-                        Some(ColorFilter::Greyscale) => cosmic_a11y_manager_v1::Filter::Greyscale,
-                        Some(ColorFilter::Protanopia) => {
-                            cosmic_a11y_manager_v1::Filter::DaltonizeProtanopia
+                let mut filter_state = ActiveState::Enabled;
+                let filter = match filter {
+                    None => {
+                        if state.global.version() < 3 {
+                            cosmic_a11y_manager_v1::Filter::Disabled
+                        } else {
+                            filter_state = ActiveState::Disabled;
+                            cosmic_a11y_manager_v1::Filter::Unknown
                         }
-                        Some(ColorFilter::Deuteranopia) => {
-                            cosmic_a11y_manager_v1::Filter::DaltonizeDeuteranopia
-                        }
-                        Some(ColorFilter::Tritanopia) => {
-                            cosmic_a11y_manager_v1::Filter::DaltonizeTritanopia
-                        }
-                        Some(ColorFilter::Unknown) => cosmic_a11y_manager_v1::Filter::Unknown,
-                    },
-                );
+                    }
+                    Some(ColorFilter::Greyscale) => cosmic_a11y_manager_v1::Filter::Greyscale,
+                    Some(ColorFilter::Protanopia) => {
+                        cosmic_a11y_manager_v1::Filter::DaltonizeProtanopia
+                    }
+                    Some(ColorFilter::Deuteranopia) => {
+                        cosmic_a11y_manager_v1::Filter::DaltonizeDeuteranopia
+                    }
+                    Some(ColorFilter::Tritanopia) => {
+                        cosmic_a11y_manager_v1::Filter::DaltonizeTritanopia
+                    }
+                    Some(ColorFilter::Unknown) => cosmic_a11y_manager_v1::Filter::Unknown,
+                };
+                if state.global.version() < 3 {
+                    state.global.set_screen_filter(
+                        if inverted {
+                            cosmic_a11y_manager_v1::ActiveState::Enabled
+                        } else {
+                            cosmic_a11y_manager_v1::ActiveState::Disabled
+                        },
+                        filter,
+                    );
+                } else {
+                    state.global.set_screen_filter2(
+                        if inverted {
+                            cosmic_a11y_manager_v1::ActiveState::Enabled
+                        } else {
+                            cosmic_a11y_manager_v1::ActiveState::Disabled
+                        },
+                        filter,
+                        filter_state,
+                    );
+                }
             }
             channel::Event::Closed => {
                 state.loop_signal.stop();
