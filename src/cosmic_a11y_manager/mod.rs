@@ -51,7 +51,9 @@ pub enum AccessibilityRequest {
 
 pub type Sender = calloop::channel::Sender<AccessibilityRequest>;
 
-pub fn spawn_wayland_connection() -> Result<
+pub fn spawn_wayland_connection(
+    a11y_manager_min: u32,
+) -> Result<
     (
         channel::Sender<AccessibilityRequest>,
         mpsc::Receiver<AccessibilityEvent>,
@@ -63,7 +65,7 @@ pub fn spawn_wayland_connection() -> Result<
     let conn = Connection::connect_to_env()?;
 
     std::thread::spawn(move || {
-        if let Err(err) = wayland_thread(conn, event_tx.clone(), request_rx, 1) {
+        if let Err(err) = wayland_thread(conn, event_tx.clone(), request_rx, a11y_manager_min) {
             tracing::warn!("Accessibility protocol wayland thread crashed: {}", err);
             let _ = event_tx.blocking_send(AccessibilityEvent::Closed);
         }
