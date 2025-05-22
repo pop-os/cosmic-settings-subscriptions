@@ -25,7 +25,7 @@ tokio-stream = "0.1.15"
 tracing = "0.1.40"
 upower_dbus = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
 bluez-zbus = { git = "https://github.com/pop-os/dbus-settings-bindings", optional = true }
-zbus = "4.4.0"
+zbus = "5.7.1"
 
 [features]
 default = [

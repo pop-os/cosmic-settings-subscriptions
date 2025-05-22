@@ -14,17 +14,17 @@ enum DevicePropertyWatcherTask {
     Removed(OwnedObjectPath),
 }
 
-struct DevicePropertyWatcher<'a> {
-    stream: futures::stream::SelectAll<SignalWatcher<'a>>,
+struct DevicePropertyWatcher {
+    stream: futures::stream::SelectAll<SignalWatcher>,
     rx: mpsc::Receiver<DevicePropertyWatcherTask>,
 }
 
-struct SignalWatcher<'a> {
-    stream: zbus::fdo::PropertiesChangedStream<'a>,
+struct SignalWatcher {
+    stream: zbus::fdo::PropertiesChangedStream,
     path: OwnedObjectPath,
 }
 
-impl<'a> futures::Stream for SignalWatcher<'a> {
+impl futures::Stream for SignalWatcher {
     type Item = zbus::fdo::PropertiesChanged;
 
     fn poll_next(
@@ -38,7 +38,7 @@ impl<'a> futures::Stream for SignalWatcher<'a> {
     }
 }
 
-impl<'a> DevicePropertyWatcher<'a> {
+impl DevicePropertyWatcher {
     fn new() -> (Self, mpsc::Sender<DevicePropertyWatcherTask>) {
         let stream = futures::stream::select_all(vec![]);
         let (tx, rx) = mpsc::channel(10);
@@ -166,7 +166,7 @@ pub async fn watch(connection: zbus::Connection, mut tx: futures::channel::mpsc:
                     signal = receive_interfaces_removed.next() => match signal {
                         Some(signal) => {
                             let args = signal.args()?;
-                            if args.interfaces.contains(&"org.bluez.Device1") {
+                            if args.interfaces.iter().any(|i| i == "org.bluez.Device1") {
                                 property_watcher_task.send(DevicePropertyWatcherTask::Removed(
                                     args.object_path.to_owned().into(),
                                 )).await.map_err(|e| zbus::Error::Failure(e.to_string()))?;
@@ -175,12 +175,12 @@ pub async fn watch(connection: zbus::Connection, mut tx: futures::channel::mpsc:
                                     .await
                                     .map_err(|e| zbus::Error::Failure(e.to_string()))?;
 
-                            } else if args.interfaces.contains(&"org.bluez.Battery1") {
+                            } else if args.interfaces.iter().any(|i| i == "org.bluez.Battery1") {
                                 tx
                                     .send(Event::UpdatedDevice(args.object_path.to_owned().into(), vec![DeviceUpdate::Battery(None)]))
                                     .await
                                     .map_err(|e| zbus::Error::Failure(e.to_string()))?;
-                            } else if args.interfaces.contains(&"org.bluez.Adapter1") {
+                            } else if args.interfaces.iter().any(|i| i == "org.bluez.Adapter1") {
                                 tx
                                     .send(Event::RemovedAdapter(args.object_path.to_owned().into()))
                                     .await
