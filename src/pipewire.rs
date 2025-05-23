@@ -87,6 +87,7 @@ pub enum DeviceVariant {
         codec: String,
         profile: String,
     },
+    Unknown {},
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,12 +119,14 @@ impl Device {
                     card_profile_device: props.get("card.profile.device")?.parse::<u32>().ok()?,
                     device_profile_description: props.get("device.profile.description")?.to_owned(),
                 }
-            } else {
+            } else if let Some(address) = props.get("api.bluez5.address").and_then(|v| v.parse::<String>().ok()) {
                 DeviceVariant::Bluez5 {
-                    address: props.get("api.bluez5.address")?.to_owned(),
+                    address: address.to_owned(),
                     codec: props.get("api.bluez5.codec")?.to_owned(),
                     profile: props.get("api.bluez5.profile")?.to_owned(),
                 }
+            } else {
+                DeviceVariant::Unknown {}
             };
 
         Some(Device {
