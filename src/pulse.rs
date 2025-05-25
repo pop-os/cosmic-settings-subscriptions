@@ -351,6 +351,7 @@ pub enum DeviceVariant {
         codec: String,
         profile: String,
     },
+    Unknown {},
 }
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
