@@ -110,9 +110,12 @@ impl Device {
     #[must_use]
     pub fn from_node(info: &NodeInfoRef) -> Option<Self> {
         let props = info.props()?;
+        let mut desc_prop_name = "node.description";
 
         let variant =
             if let Some(alsa_card) = props.get("alsa.card").and_then(|v| v.parse::<u32>().ok()) {
+                desc_prop_name = "alsa.name";
+
                 DeviceVariant::Alsa {
                     alsa_card,
                     alsa_card_name: props.get("alsa.card_name")?.to_owned(),
@@ -138,7 +141,7 @@ impl Device {
                 _ => return None,
             },
             node_description: props
-                .get("node.description")?
+                .get(&desc_prop_name)?
                 .replace("High Definition Audio", "HD Audio"),
             node_name: props.get("node.name")?.to_owned(),
             state: match info.state() {
