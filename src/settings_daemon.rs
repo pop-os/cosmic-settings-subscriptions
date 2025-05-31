@@ -26,9 +26,11 @@ pub fn subscription(connection: zbus::Connection) -> iced_futures::Subscription<
                 .receive_max_display_brightness_changed()
                 .await;
             let brightness_stream = settings_daemon.receive_display_brightness_changed().await;
+            let owner_stream = settings_daemon.0.receive_owner_changed().await.unwrap();
 
             let initial = futures::stream::iter([Event::Sender(tx)]);
 
+            let settings_daemon_clone = settings_daemon.clone();
             initial.chain(futures::stream_select!(
                 Box::pin(UnboundedReceiverStream::new(rx).filter_map(move |request| {
                     let settings_daemon = settings_daemon.clone();
@@ -46,7 +48,35 @@ pub fn subscription(connection: zbus::Connection) -> iced_futures::Subscription<
                 })),
                 Box::pin(brightness_stream.filter_map(|evt| async move {
                     Some(Event::DisplayBrightness(evt.get().await.ok()?))
-                }))
+                })),
+                Box::pin(owner_stream.flat_map(move |owner| {
+                    let settings_daemon = settings_daemon_clone.clone();
+                    async move {
+                        // TODO send None if owner is lost? Needs to be well-ordered. Or tracked
+                        // seperately from brightness.
+                        if owner.is_some() {
+                            return futures::stream::iter(
+                                [
+                                    settings_daemon
+                                        .display_brightness()
+                                        .await
+                                        .ok()
+                                        .map(Event::DisplayBrightness),
+                                    settings_daemon
+                                        .max_display_brightness()
+                                        .await
+                                        .ok()
+                                        .map(Event::MaxDisplayBrightness),
+                                ]
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .left_stream();
+                        }
+                        futures::stream::empty().right_stream()
+                    }
+                    .flatten_stream()
+                })),
             ))
         }
         .flatten_stream(),
