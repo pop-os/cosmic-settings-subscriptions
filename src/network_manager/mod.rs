@@ -325,28 +325,19 @@ async fn start_listening(
                 }
 
                 Some(Request::SelectAccessPoint(ssid, hw_address, network_type)) => {
-                    // wait for identity before attempting to connect.
-                    if !matches!(network_type, NetworkType::Open) {
-                        return State::Waiting(conn, rx);
-                    }
-                    let state = NetworkManagerState::new(&conn).await.unwrap_or_default();
-                    let success = if let Err(err) = state
-                        .connect_wifi(&conn, &ssid, None, None, hw_address)
-                        .await
-                    {
-                        tracing::error!("Failed to connect to access point: {:?}", err);
-                        false
+                    if matches!(network_type, NetworkType::Open) {
+                        attempt_wifi_connection(&conn, ssid, hw_address, network_type, output)
+                            .await;
                     } else {
-                        true
-                    };
+                        // For secured networks, check if we have saved credentials
+                        if !has_saved_wifi_credentials(&conn, &ssid).await {
+                            return State::Waiting(conn, rx);
+                        }
 
-                    _ = request_response(
-                        &conn,
-                        Request::SelectAccessPoint(ssid.clone(), hw_address, network_type),
-                        success,
-                    )
-                    .then(|event| output.send(event))
-                    .await;
+                        // We have saved credentials, attempt connection
+                        attempt_wifi_connection(&conn, ssid, hw_address, network_type, output)
+                            .await;
+                    }
                 }
 
                 Some(Request::Activate(device_path, connection_path)) => {
@@ -477,6 +468,59 @@ async fn request_response(conn: &zbus::Connection, req: Request, success: bool) 
         success,
         state: NetworkManagerState::new(conn).await.unwrap_or_default(),
     }
+}
+
+async fn has_saved_wifi_credentials(conn: &zbus::Connection, ssid: &str) -> bool {
+    let Ok(nm_settings) = NetworkManagerSettings::new(conn).await else {
+        return false;
+    };
+
+    let known_conns = nm_settings.list_connections().await.unwrap_or_default();
+
+    for connection in known_conns {
+        if let Ok(settings) = connection.get_settings().await {
+            let settings = Settings::new(settings);
+            if let Some(saved_ssid) = settings
+                .wifi
+                .and_then(|w| w.ssid)
+                .and_then(|ssid| String::from_utf8(ssid).ok())
+            {
+                if saved_ssid == ssid {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+async fn attempt_wifi_connection(
+    conn: &zbus::Connection,
+    ssid: SSID,
+    hw_address: HwAddress,
+    network_type: NetworkType,
+    output: &mut futures::channel::mpsc::Sender<Event>,
+) {
+    let state = NetworkManagerState::new(conn).await.unwrap_or_default();
+
+    let success = if let Err(err) = state
+        .connect_wifi(conn, ssid.as_ref(), None, None, hw_address)
+        .await
+    {
+        tracing::error!("Failed to connect to access point: {:?}", err);
+        false
+    } else {
+        true
+    };
+
+    _ = request_response(
+        conn,
+        Request::SelectAccessPoint(ssid, hw_address, network_type),
+        success,
+    )
+    .then(|event| output.send(event))
+    .await;
 }
 
 #[derive(Debug, Clone)]
