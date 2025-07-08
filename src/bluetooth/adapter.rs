@@ -199,6 +199,11 @@ pub async fn stop_discovery(connection: zbus::Connection, adapter_path: OwnedObj
 
         if let Err(why) = result {
             tracing::warn!("Unable to stop bluetooth scanning: {why}");
+            if why.to_string().contains("No discovery started") {
+                return Event::DBusError(why);
+            }
+
+            tracing::warn!("Unable to stop bluetooth scanning: {why}");
             tokio::time::sleep(Duration::from_millis(1000 * attempt)).await;
         } else {
             tracing::debug!("Discovery stopped");
