@@ -31,7 +31,7 @@ use std::{
         raw::c_void,
     },
     rc::Rc,
-    sync::{mpsc, Arc},
+    sync::mpsc,
 };
 
 pub fn subscription() -> iced_futures::Subscription<Event> {
@@ -45,82 +45,75 @@ pub fn subscription() -> iced_futures::Subscription<Event> {
 }
 
 pub fn thread(sender: futures::channel::mpsc::Sender<Event>) {
-    let mut started = false;
+    let Some(mut main_loop) = Mainloop::new() else {
+        log::error!("Failed to create PA main loop");
+        return;
+    };
+
+    let Some(mut context) = Context::new(&main_loop, "cosmic-osd") else {
+        log::error!("Failed to create PA context");
+        return;
+    };
+
+    let data = Rc::new(Data {
+        main_loop: RefCell::new(Mainloop {
+            _inner: Rc::clone(&main_loop._inner),
+        }),
+        introspector: context.introspect(),
+        sink_volume: Cell::new(None),
+        sink_mute: Cell::new(None),
+        source_volume: Cell::new(None),
+        source_mute: Cell::new(None),
+        default_sink_name: RefCell::new(None),
+        default_source_name: RefCell::new(None),
+        sender: RefCell::new(sender.clone()),
+    });
+
+    let data_clone = data.clone();
+    context.set_subscribe_callback(Some(Box::new(move |facility, operation, index| {
+        data_clone.subscribe_cb(facility.unwrap(), operation, index);
+    })));
+
+    let _ = context.connect(None, FlagSet::NOFAIL, None);
 
     loop {
-        let Some(mut main_loop) = Mainloop::new() else {
-            log::error!("Failed to create PA main loop");
+        if sender.is_closed() {
             return;
-        };
+        }
 
-        let Some(mut context) = Context::new(&main_loop, "cosmic-osd") else {
-            log::error!("Failed to create PA context");
-            return;
-        };
-
-        let data = Rc::new(Data {
-            main_loop: RefCell::new(Mainloop {
-                _inner: Rc::clone(&main_loop._inner),
-            }),
-            introspector: context.introspect(),
-            sink_volume: Cell::new(None),
-            sink_mute: Cell::new(None),
-            source_volume: Cell::new(None),
-            source_mute: Cell::new(None),
-            default_sink_name: RefCell::new(None),
-            default_source_name: RefCell::new(None),
-            sender: RefCell::new(sender.clone()),
-        });
-
-        let data_clone = data.clone();
-        context.set_subscribe_callback(Some(Box::new(move |facility, operation, index| {
-            data_clone.subscribe_cb(facility.unwrap(), operation, index);
-        })));
-
-        let _ = context.connect(None, FlagSet::NOFAIL, None);
-
-        loop {
-            if sender.is_closed() {
+        match main_loop.iterate(false) {
+            IterateResult::Success(_) => {}
+            IterateResult::Err(_e) => {
                 return;
             }
-
-            match main_loop.iterate(false) {
-                IterateResult::Success(_) => {}
-                IterateResult::Err(_e) => {
-                    return;
-                }
-                IterateResult::Quit(_e) => {
-                    return;
-                }
-            }
-
-            if context.get_state() == State::Ready {
-                if !started {
-                    started = true;
-
-                    // Inspect all available cards on startup
-                    data.introspector.get_card_info_list({
-                        let data_weak = Rc::downgrade(&data);
-                        move |card_info_res| {
-                            if let Some(data) = data_weak.upgrade() {
-                                data.card_info_cb(card_info_res)
-                            }
-                        }
-                    });
-                }
-                break;
+            IterateResult::Quit(_e) => {
+                return;
             }
         }
 
-        data.get_server_info();
-        context.subscribe(
-            InterestMaskSet::SERVER | InterestMaskSet::SINK | InterestMaskSet::SOURCE,
-            |_| {},
-        );
-
-        if let Err((err, retval)) = main_loop.run() {
-            log::error!("PA main loop returned {:?}, error {}", retval, err);
+        if context.get_state() == State::Ready {
+            break;
         }
+    }
+
+    // Inspect all available cards on startup
+    data.introspector.get_card_info_list({
+        let data_weak = Rc::downgrade(&data);
+        move |card_info_res| {
+            if let Some(data) = data_weak.upgrade() {
+                data.card_info_cb(card_info_res)
+            }
+        }
+    });
+
+    data.get_server_info();
+    context.subscribe(
+        InterestMaskSet::SERVER | InterestMaskSet::SINK | InterestMaskSet::SOURCE,
+        |_| {},
+    );
+
+    if let Err((err, retval)) = main_loop.run() {
+        log::error!("PA main loop returned {:?}, error {}", retval, err);
     }
 }
 
@@ -140,6 +133,7 @@ pub enum Event {
 enum Request {
     Volume(u32, f32),
     Balance(u32, f32),
+    Quit,
 }
 
 #[derive(Debug)]
@@ -238,6 +232,10 @@ extern "C" fn handle_balance_io_new(
                     }
                 }
             }
+            Request::Quit => unsafe { &*api }
+                .quit
+                .as_ref()
+                .expect("quit function missing")(api, 0),
         }
     }
 
@@ -306,6 +304,12 @@ impl PulseChannels {
                 .write_all(&[1])
                 .expect("PulseChannels pipe write failed");
         }
+    }
+
+    /// Request the pulse thread to quit.
+    pub fn quit(mut self) {
+        _ = self.tx.send(Request::Quit);
+        _ = self.pipe_tx.write_all(&[1]);
     }
 }
 
