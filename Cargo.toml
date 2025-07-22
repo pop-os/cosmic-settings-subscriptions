@@ -28,16 +28,7 @@ bluez-zbus = { git = "https://github.com/pop-os/dbus-settings-bindings", optiona
 zbus = "5.7.1"
 
 [features]
-default = [
-    "accessibility",
-    "airplane_mode",
-    "bluetooth",
-    "cosmic_a11y_manager",
-    "network_manager",
-    "pulse",
-    "upower",
-    "settings_daemon",
-]
+default = []
 accessibility = ["cosmic-dbus-a11y"]
 cosmic_a11y_manager = ["cosmic-protocols", "num-derive", "num-traits", "sctk"]
 airplane_mode = ["rustix", "rustix/fs"]
