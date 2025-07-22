@@ -313,6 +313,7 @@ impl PulseChannels {
 pub struct Card {
     pub object_id: u32,
     pub name: String,
+    pub product_name: String,
     pub variant: DeviceVariant,
     pub ports: Vec<CardPort>,
     pub profiles: Vec<CardProfile>,
@@ -341,16 +342,8 @@ pub struct CardProfile {
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub enum DeviceVariant {
-    Alsa {
-        alsa_card: u32,
-        alsa_card_name: String,
-        card_profile_device: u32,
-    },
-    Bluez5 {
-        address: String,
-        codec: String,
-        profile: String,
-    },
+    Alsa { alsa_card: u32 },
+    Bluez5 { address: String },
 }
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -395,30 +388,9 @@ impl Data {
                 .get_str("alsa.card")
                 .and_then(|v| v.parse::<u32>().ok())
             {
-                DeviceVariant::Alsa {
-                    alsa_card,
-                    alsa_card_name: card_info
-                        .proplist
-                        .get_str("alsa.card_name")
-                        .unwrap_or_default(),
-                    card_profile_device: card_info
-                        .proplist
-                        .get_str("card.profile.device")
-                        .and_then(|v| v.parse::<u32>().ok())
-                        .unwrap_or_default(),
-                }
+                DeviceVariant::Alsa { alsa_card }
             } else if let Some(address) = card_info.proplist.get_str("api.bluez5.address") {
-                DeviceVariant::Bluez5 {
-                    address,
-                    codec: card_info
-                        .proplist
-                        .get_str("api.bluez5.codec")
-                        .unwrap_or_default(),
-                    profile: card_info
-                        .proplist
-                        .get_str("api.bluez5.profile")
-                        .unwrap_or_default(),
-                }
+                DeviceVariant::Bluez5 { address }
             } else {
                 return;
             };
@@ -428,6 +400,10 @@ impl Data {
                     .name
                     .as_ref()
                     .map(Cow::to_string)
+                    .unwrap_or_default(),
+                product_name: card_info
+                    .proplist
+                    .get_str("device.product.name")
                     .unwrap_or_default(),
                 object_id,
                 variant,
