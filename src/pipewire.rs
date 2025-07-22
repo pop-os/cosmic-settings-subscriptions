@@ -38,7 +38,9 @@ pub fn thread(
     let (pw_tx, pw_rx) = pipewire::channel::channel();
 
     let handle = std::thread::spawn(move || {
+        eprintln!("starting pipewire thread");
         devices_from_socket(pw_rx, on_event);
+        eprintln!("exiting pipewire thread");
     });
 
     (handle, pw_tx)
@@ -197,7 +199,7 @@ pub fn nodes_from_socket(
     let core = context.connect(None)?;
 
     // Exit main loop on receivering terminate message.
-    _ = pw_cancel.attach(main_loop.loop_(), {
+    let _cancel_rx = pw_cancel.attach(main_loop.loop_(), {
         let main_loop = main_loop.clone();
         move |_| main_loop.quit()
     });
