@@ -33,7 +33,7 @@ pub fn subscription() -> iced_futures::Subscription<DeviceEvent> {
 }
 
 pub fn thread(
-    mut on_event: futures::channel::mpsc::Sender<DeviceEvent>,
+    on_event: futures::channel::mpsc::Sender<DeviceEvent>,
 ) -> (JoinHandle<()>, pipewire::channel::Sender<()>) {
     let (pw_tx, pw_rx) = pipewire::channel::channel();
 
@@ -69,24 +69,15 @@ pub struct Device {
     pub object_id: u32,
     pub variant: DeviceVariant,
     pub media_class: MediaClass,
-    pub node_description: String,
+    pub product_name: String,
     pub node_name: String,
     pub state: DeviceState,
 }
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub enum DeviceVariant {
-    Alsa {
-        alsa_card: u32,
-        alsa_card_name: String,
-        card_profile_device: u32,
-        device_profile_description: String,
-    },
-    Bluez5 {
-        address: String,
-        codec: String,
-        profile: String,
-    },
+    Alsa { alsa_card: u32 },
+    Bluez5 { address: String },
     Unknown {},
 }
 
@@ -111,23 +102,35 @@ impl Device {
     pub fn from_node(info: &NodeInfoRef) -> Option<Self> {
         let props = info.props()?;
 
-        let variant =
-            if let Some(alsa_card) = props.get("alsa.card").and_then(|v| v.parse::<u32>().ok()) {
-                DeviceVariant::Alsa {
-                    alsa_card,
-                    alsa_card_name: props.get("alsa.card_name")?.to_owned(),
-                    card_profile_device: props.get("card.profile.device")?.parse::<u32>().ok()?,
-                    device_profile_description: props.get("device.profile.description")?.to_owned(),
-                }
-            } else if let Some(address) = props.get("api.bluez5.address").and_then(|v| v.parse::<String>().ok()) {
+        let (variant, product_name) = if let Some(alsa_card) =
+            props.get("alsa.card").and_then(|v| v.parse::<u32>().ok())
+        {
+            let device_profile_description = props.get("device.profile.description")?.to_owned();
+
+            let description = props.get("node.description")?;
+
+            let description = description
+                .strip_suffix(&device_profile_description)
+                .unwrap_or(description)
+                .replace("High Definition Audio", "HD Audio");
+
+            (DeviceVariant::Alsa { alsa_card }, description)
+        } else if let Some(address) = props
+            .get("api.bluez5.address")
+            .and_then(|v| v.parse::<String>().ok())
+        {
+            (
                 DeviceVariant::Bluez5 {
                     address: address.to_owned(),
-                    codec: props.get("api.bluez5.codec")?.to_owned(),
-                    profile: props.get("api.bluez5.profile")?.to_owned(),
-                }
-            } else {
-                DeviceVariant::Unknown {}
-            };
+                },
+                props.get("node.description")?.to_owned(),
+            )
+        } else {
+            (
+                DeviceVariant::Unknown {},
+                props.get("node.description")?.to_owned(),
+            )
+        };
 
         Some(Device {
             object_id: props.get("object.id")?.parse::<u32>().ok()?,
@@ -137,9 +140,7 @@ impl Device {
                 "Audio/Source" => MediaClass::Source,
                 _ => return None,
             },
-            node_description: props
-                .get("node.description")?
-                .replace("High Definition Audio", "HD Audio"),
+            product_name,
             node_name: props.get("node.name")?.to_owned(),
             state: match info.state() {
                 NodeState::Idle => DeviceState::Idle,
