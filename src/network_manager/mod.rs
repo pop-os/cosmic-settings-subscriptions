@@ -63,6 +63,14 @@ pub enum State {
     Finished,
 }
 
+// In some distros, rfkill is only in sbin, which isn't normally in PATH
+// TODO: Directly access `/dev/rfkill`
+fn rfkill_path_var() -> std::ffi::OsString {
+    let mut path = std::env::var_os("PATH").unwrap_or_default();
+    path.push(":/usr/sbin");
+    path
+}
+
 /// Reloads state on available connection changes.
 pub async fn watch_connections_changed(
     conn: zbus::Connection,
@@ -251,6 +259,7 @@ async fn start_listening(
                     // bluetooth
                     success = success
                         && Command::new("rfkill")
+                            .env("PATH", rfkill_path_var())
                             .arg(if airplane_mode { "block" } else { "unblock" })
                             .arg("bluetooth")
                             .output()
@@ -610,6 +619,7 @@ impl NetworkManagerState {
     ) -> Result<(), Error> {
         let (airplane_mode, wireless_enabled, settings_res) = futures::join!(
             Command::new("rfkill")
+                .env("PATH", rfkill_path_var())
                 .arg("list")
                 .arg("bluetooth")
                 .output()
