@@ -38,9 +38,7 @@ pub fn thread(
     let (pw_tx, pw_rx) = pipewire::channel::channel();
 
     let handle = std::thread::spawn(move || {
-        eprintln!("starting pipewire thread");
         devices_from_socket(pw_rx, on_event);
-        eprintln!("exiting pipewire thread");
     });
 
     (handle, pw_tx)
@@ -113,6 +111,7 @@ impl Device {
 
             let description = description
                 .strip_suffix(&device_profile_description)
+                .map(str::trim_end)
                 .unwrap_or(description)
                 .replace("High Definition Audio", "HD Audio");
 
@@ -133,6 +132,8 @@ impl Device {
                 props.get("node.description")?.to_owned(),
             )
         };
+
+        // eprintln!("pipewire props for {product_name}: {props:#?}");
 
         Some(Device {
             object_id: props.get("object.id")?.parse::<u32>().ok()?,

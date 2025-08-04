@@ -25,6 +25,8 @@ pub mod bluetooth;
 #[cfg(feature = "settings_daemon")]
 pub mod settings_daemon;
 
+#[cfg(feature = "sound")]
+pub mod sound;
+
 #[cfg(feature = "upower")]
 pub mod upower;
-
