@@ -185,6 +185,22 @@ impl Model {
         self.active_source_profile
     }
 
+    pub fn sinks(&self) -> &[String] {
+        &self.sinks
+    }
+
+    pub fn sink_profiles(&self) -> &[String] {
+        &self.sink_profiles
+    }
+
+    pub fn sources(&self) -> &[String] {
+        &self.sources
+    }
+
+    pub fn source_profiles(&self) -> &[String] {
+        &self.source_profiles
+    }
+
     pub fn clear(&mut self) {
         if let Some(handle) = self.subscription_handle.take() {
             _ = handle.cancel_tx.send(());
@@ -194,22 +210,6 @@ impl Model {
         if let Some(channel) = self.sink_channels.take() {
             channel.quit();
         }
-    }
-
-    pub fn sinks(&self) -> &[String] {
-        &self.sinks
-    }
-
-    pub fn sink_profiles(&self) -> &[String] {
-        &self.sink_profiles
-    }
-
-    pub fn source_profiles(&self) -> &[String] {
-        &self.sink_profiles
-    }
-
-    pub fn sources(&self) -> &[String] {
-        &self.sources
     }
 
     pub fn sink_balance_changed(&mut self, balance: u32) -> Task<Message> {
