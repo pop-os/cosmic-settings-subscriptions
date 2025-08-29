@@ -338,7 +338,7 @@ pub struct CardPort {
     pub availability: Availability,
 }
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum Availability {
     Unknown,
     No,
