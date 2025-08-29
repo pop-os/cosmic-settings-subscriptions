@@ -14,7 +14,7 @@ use libpulse_binding::{
         subscribe::{Facility, InterestMaskSet, Operation},
         Context, FlagSet, State,
     },
-    def::Retval,
+    def::{PortAvailable, Retval},
     mainloop::{
         api::MainloopApi,
         events::io::IoEventInternal,
@@ -25,12 +25,14 @@ use libpulse_binding::{
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
+    convert::Infallible,
     io::{Read, Write},
     os::{
         fd::{FromRawFd, IntoRawFd, RawFd},
         raw::c_void,
     },
     rc::Rc,
+    str::FromStr,
     sync::mpsc,
 };
 
@@ -333,6 +335,24 @@ pub struct CardPort {
     pub profile_port: u32,
     pub priority: u32,
     pub profiles: Vec<CardProfile>,
+    pub availability: Availability,
+}
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+pub enum Availability {
+    Unknown,
+    No,
+    Yes,
+}
+
+impl From<PortAvailable> for Availability {
+    fn from(pa: PortAvailable) -> Self {
+        match pa {
+            PortAvailable::Unknown => Availability::Unknown,
+            PortAvailable::No => Availability::No,
+            PortAvailable::Yes => Availability::Yes,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -342,6 +362,7 @@ pub struct CardProfile {
     pub available: bool,
     pub n_sinks: u32,
     pub n_sources: u32,
+    pub priority: u32,
 }
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -357,11 +378,30 @@ pub enum Direction {
     Both,
 }
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Default, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum PortType {
-    Analog,
+    Mic,
+    Speaker,
+    Headphones,
+    Headset,
     Digital,
+    #[default]
     Unknown,
+}
+
+impl FromStr for PortType {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "mic" => Ok(PortType::Mic),
+            "speaker" => Ok(PortType::Speaker),
+            "headphones" => Ok(PortType::Headphones),
+            "headset" => Ok(PortType::Headset),
+            "digital" => Ok(PortType::Digital),
+            _ => Ok(PortType::Unknown),
+        }
+    }
 }
 
 struct Data {
@@ -430,11 +470,12 @@ impl Data {
                             }
                             _ => Direction::Both,
                         },
-                        port_type: match port.proplist.get_str("port.type").as_deref() {
-                            Some("analog") => PortType::Analog,
-                            Some("digital") => PortType::Digital,
-                            _ => PortType::Unknown,
-                        },
+                        port_type: port
+                            .proplist
+                            .get_str("port.type")
+                            .as_deref()
+                            .map(|s| PortType::from_str(s).unwrap())
+                            .unwrap_or_default(),
                         profile_port: port
                             .proplist
                             .get_str("card.profile.port")
@@ -442,6 +483,7 @@ impl Data {
                             .unwrap_or(0),
                         priority: port.priority,
                         profiles: collect_profiles(&port.profiles),
+                        availability: port.available.into(),
                     })
                     .collect(),
                 profiles: collect_profiles(&card_info.profiles),
@@ -584,16 +626,40 @@ impl Data {
 
     fn get_sink_info_by_index(self: &Rc<Self>, index: u32) {
         let data = self.clone();
-        self.introspector
-            .get_sink_info_by_index(index, move |sink_info_res| {
+        self.introspector.get_sink_info_by_index(
+            index,
+            move |sink_info_res: ListResult<&SinkInfo<'_>>| {
+                if let ListResult::Item(ref info) = sink_info_res {
+                    if let Some(card_index) = info.card {
+                        let data_clone = data.clone();
+                        data.introspector.get_card_info_by_index(
+                            card_index,
+                            move |card_info_res| {
+                                data_clone.card_info_cb(card_info_res);
+                            },
+                        );
+                    }
+                }
                 data.sink_info_cb(sink_info_res);
-            });
+            },
+        );
     }
 
     fn get_sink_info_by_name(self: &Rc<Self>, name: &str) {
         let data = self.clone();
         self.introspector
             .get_sink_info_by_name(name, move |sink_info_res| {
+                if let ListResult::Item(ref info) = sink_info_res {
+                    if let Some(card_index) = info.card {
+                        let data_clone = data.clone();
+                        data.introspector.get_card_info_by_index(
+                            card_index,
+                            move |card_info_res| {
+                                data_clone.card_info_cb(card_info_res);
+                            },
+                        );
+                    }
+                }
                 data.sink_info_cb(sink_info_res);
             });
     }
@@ -602,6 +668,17 @@ impl Data {
         let data = self.clone();
         self.introspector
             .get_source_info_by_index(index, move |source_info_res| {
+                if let ListResult::Item(ref info) = source_info_res {
+                    if let Some(card_index) = info.card {
+                        let data_clone = data.clone();
+                        data.introspector.get_card_info_by_index(
+                            card_index,
+                            move |card_info_res| {
+                                data_clone.card_info_cb(card_info_res);
+                            },
+                        );
+                    }
+                }
                 data.source_info_cb(source_info_res);
             });
     }
@@ -610,6 +687,17 @@ impl Data {
         let data = self.clone();
         self.introspector
             .get_source_info_by_name(name, move |source_info_res| {
+                if let ListResult::Item(ref info) = source_info_res {
+                    if let Some(card_index) = info.card {
+                        let data_clone = data.clone();
+                        data.introspector.get_card_info_by_index(
+                            card_index,
+                            move |card_info_res| {
+                                data_clone.card_info_cb(card_info_res);
+                            },
+                        );
+                    }
+                }
                 data.source_info_cb(source_info_res);
             });
     }
@@ -658,6 +746,7 @@ impl From<&CardProfileInfo<'_>> for CardProfile {
             available: profile.available,
             n_sinks: profile.n_sinks,
             n_sources: profile.n_sources,
+            priority: profile.priority,
         }
     }
 }
