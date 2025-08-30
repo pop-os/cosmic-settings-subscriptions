@@ -7,7 +7,7 @@
 use futures::{FutureExt, Stream, StreamExt};
 use iced_futures::Subscription;
 use std::{fmt::Debug, hash::Hash};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use upower_dbus::{BrightnessChanged, KbdBacklightProxy};
 

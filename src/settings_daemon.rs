@@ -5,7 +5,7 @@
 
 use futures::{FutureExt, StreamExt};
 use iced_futures::Subscription;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 pub fn subscription(connection: zbus::Connection) -> iced_futures::Subscription<Event> {
