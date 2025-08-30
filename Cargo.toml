@@ -14,7 +14,7 @@ sctk = { git = "https://github.com/smithay/client-toolkit/", package = "smithay-
 futures = "0.3.30"
 iced_futures = { git = "https://github.com/pop-os/libcosmic" }
 itertools = "0.14.0"
-libcosmic = { git = "https://github.com/pop-os/libcosmic" }
+libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false }
 libpulse-binding = { version = "2.29.0", optional = true }
 log = "0.4.22"
 pipewire = { version = "0.8.0", optional = true }
