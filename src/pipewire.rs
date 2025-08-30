@@ -5,8 +5,8 @@
 
 pub use pipewire::channel::Sender;
 
-use futures::{executor::block_on, SinkExt};
-use iced_futures::{stream, Subscription};
+use futures::{SinkExt, executor::block_on};
+use iced_futures::{Subscription, stream};
 use pipewire::{
     context::Context as PwContext,
     main_loop::MainLoop as PwMainLoop,

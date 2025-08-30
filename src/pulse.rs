@@ -4,15 +4,15 @@
 // Make sure not to fail if pulse not found, and reconnect?
 // change to device shouldn't send osd?
 
-use futures::{executor::block_on, SinkExt};
-use iced_futures::{stream, Subscription};
+use futures::{SinkExt, executor::block_on};
+use iced_futures::{Subscription, stream};
 use libpulse_binding::{
     callbacks::ListResult,
     channelmap::Map,
     context::{
+        Context, FlagSet, State,
         introspect::{CardInfo, CardProfileInfo, Introspector, ServerInfo, SinkInfo, SourceInfo},
         subscribe::{Facility, InterestMaskSet, Operation},
-        Context, FlagSet, State,
     },
     def::{PortAvailable, Retval},
     mainloop::{

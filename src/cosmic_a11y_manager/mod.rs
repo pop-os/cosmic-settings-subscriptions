@@ -2,12 +2,12 @@ use cosmic_protocols::a11y::v1::client::cosmic_a11y_manager_v1::{self, ActiveSta
 use num_derive::{FromPrimitive, ToPrimitive};
 use sctk::{
     reexports::{
-        calloop::{self, channel, LoopSignal},
+        calloop::{self, LoopSignal, channel},
         calloop_wayland_source::WaylandSource,
         client::{
-            globals::{registry_queue_init, GlobalListContents},
-            protocol::wl_registry,
             ConnectError, Connection, Dispatch, Proxy, WEnum,
+            globals::{GlobalListContents, registry_queue_init},
+            protocol::wl_registry,
         },
     },
     registry::RegistryState,

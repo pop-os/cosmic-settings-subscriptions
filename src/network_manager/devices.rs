@@ -8,9 +8,9 @@ pub use cosmic_dbus_networkmanager::interface::enums::{
 
 use cosmic_dbus_networkmanager::nm::NetworkManager;
 use futures::{SinkExt, StreamExt};
-use iced_futures::{self, stream, Subscription};
+use iced_futures::{self, Subscription, stream};
 use std::{fmt::Debug, hash::Hash, sync::Arc};
-use zbus::{zvariant::ObjectPath, Connection};
+use zbus::{Connection, zvariant::ObjectPath};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DeviceInfo {

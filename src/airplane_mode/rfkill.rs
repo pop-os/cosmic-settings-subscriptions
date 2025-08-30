@@ -34,8 +34,8 @@ pub struct DeviceState {
     pub hard: bool,
 }
 
-pub fn rfkill_updates(
-) -> io::Result<impl Stream<Item = io::Result<HashMap<u32, DeviceState>>> + Unpin> {
+pub fn rfkill_updates()
+-> io::Result<impl Stream<Item = io::Result<HashMap<u32, DeviceState>>> + Unpin> {
     struct State {
         file: AsyncFd<fs::File>,
         devices: HashMap<u32, DeviceState>,

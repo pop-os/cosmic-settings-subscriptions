@@ -3,8 +3,8 @@
 
 use cosmic_dbus_a11y::*;
 use futures::FutureExt;
-use futures::{self, select, SinkExt, StreamExt};
-use iced_futures::{stream, Subscription};
+use futures::{self, SinkExt, StreamExt, select};
+use iced_futures::{Subscription, stream};
 use std::fmt::Debug;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use zbus::Connection;

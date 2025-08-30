@@ -25,18 +25,18 @@ use cosmic_dbus_networkmanager::{
     settings::NetworkManagerSettings,
 };
 use futures::{
-    channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
     FutureExt, SinkExt, StreamExt,
+    channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
 };
 use hw_address::HwAddress;
-use iced_futures::{stream, Subscription};
+use iced_futures::{Subscription, stream};
 use secure_string::SecureString;
 use tokio::process::Command;
 use zbus::zvariant::{self, ObjectPath, Value};
 
 use self::{
-    available_wifi::{handle_wireless_device, AccessPoint},
-    current_networks::{active_connections, ActiveConnectionInfo},
+    available_wifi::{AccessPoint, handle_wireless_device},
+    current_networks::{ActiveConnectionInfo, active_connections},
 };
 
 pub type SSID = Arc<str>;
